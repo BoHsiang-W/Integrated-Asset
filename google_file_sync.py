@@ -37,20 +37,29 @@ class Mail:
                 token.write(creds.to_json())
         self.service = build("gmail", "v1", credentials=creds)
 
-
-    def get_attachments(self, user_id='me') -> list:
+    def get_attachments(self, user_id="me") -> list:
         """Get attachments from the user's Gmail."""
         self.attachments = []  # Reset attachments for each call
         try:
-            results = self.service.users().messages().list(userId=user_id, q="has:attachment newer_than:1d").execute()
-            messages = results.get('messages', [])
+            results = (
+                self.service.users()
+                .messages()
+                .list(userId=user_id, q="has:attachment newer_than:1d")
+                .execute()
+            )
+            messages = results.get("messages", [])
             if not messages:
                 print("No messages found.")
                 return []
             for message in tqdm(messages):
-                msg = self.service.users().messages().get(userId=user_id, id=message['id'], format='full').execute()
-                payload = msg.get('payload', {})
-                parts = payload.get('parts', [])
+                msg = (
+                    self.service.users()
+                    .messages()
+                    .get(userId=user_id, id=message["id"], format="full")
+                    .execute()
+                )
+                payload = msg.get("payload", {})
+                parts = payload.get("parts", [])
                 self._extract_attachments(parts, user_id, msg)
             print(f"Found {len(self.attachments)} attachments.")
             return self.attachments
@@ -61,23 +70,30 @@ class Mail:
     def _extract_attachments(self, parts, user_id, message):
         """Recursively extract attachments from message parts."""
         for part in parts:
-            if part.get('filename') and part.get('body', {}).get('attachmentId'):
-                filename = part['filename']
-                attachment_id = part['body']['attachmentId']
-                attachment = self.service.users().messages().attachments().get(
-                    userId=user_id,
-                    messageId=message['id'],
-                    id=attachment_id
-                ).execute()
-                self.attachments.append({
-                    'filename': filename,
-                    'data': attachment.get('data'),
-                    'mimeType': part.get('mimeType'),
-                    'date': datetime.fromtimestamp(int(message['internalDate']) / 1000).strftime("%Y-%m-%d")
-                })
+            if part.get("filename") and part.get("body", {}).get("attachmentId"):
+                filename = part["filename"]
+                attachment_id = part["body"]["attachmentId"]
+                attachment = (
+                    self.service.users()
+                    .messages()
+                    .attachments()
+                    .get(userId=user_id, messageId=message["id"], id=attachment_id)
+                    .execute()
+                )
+                self.attachments.append(
+                    {
+                        "filename": filename,
+                        "data": attachment.get("data"),
+                        "mimeType": part.get("mimeType"),
+                        "date": datetime.fromtimestamp(
+                            int(message["internalDate"]) / 1000
+                        ).strftime("%Y-%m-%d"),
+                    }
+                )
             # Recursively check for subparts
-            if 'parts' in part:
-                self._extract_attachments(part['parts'], user_id, message)
+            if "parts" in part:
+                self._extract_attachments(part["parts"], user_id, message)
+
 
 # class Drive
 
@@ -88,7 +104,6 @@ class Mail:
 
 
 # class Stock
-
 
 
 print(Mail().get_attachments())
