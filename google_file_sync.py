@@ -8,6 +8,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 from PyPDF2 import PdfReader, PdfWriter
 
+from google import genai
+from google.genai import types
+
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -102,6 +105,30 @@ class Mail:
                 self._extract_attachments(part["parts"], user_id, message)
 
 
+class Gemini:
+    def __init__(self):
+        self.client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+        self.model = "gemini-2.5-pro"
+
+    def generate_response(self, prompt, filepath):
+        """Generate a response using Gemini."""
+        try:
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=[
+                    types.Part.from_bytes(
+                        data=filepath.read_bytes(),
+                        mime_type="application/pdf",
+                    ),
+                    prompt,
+                ],
+            )
+            return response.text
+        except Exception as e:
+            print(f"Error generating response: {e}")
+            return None
+
+
 class Stock(Mail):
     def __init__(self):
         super().__init__()
@@ -170,3 +197,17 @@ for file in attachments_dir.iterdir():
     if file.name.startswith("decrypted_"):
         continue
     Stock.decrypt_attachments(file, os.getenv("PDF_PASSWORD"))
+
+attachments_dir = Path("attachments")
+gemini = Gemini()
+prompt = (
+    "Extract only the Transaction Details as a markdown table from the attached PDF. "
+    "Focus on tabular data and ignore unrelated content."
+)
+
+for file in attachments_dir.iterdir():
+    if not file.name.startswith("decrypted_") or not file.is_file():
+        continue
+    res = gemini.generate_response(prompt, file)
+    if res:
+        print(f"Results for {file.name}:\n{res}\n")
