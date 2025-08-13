@@ -200,14 +200,15 @@ for file in attachments_dir.iterdir():
 
 attachments_dir = Path("attachments")
 gemini = Gemini()
-prompt = (
-    "Extract only the Transaction Details as a markdown table from the attached PDF. "
-    "Focus on tabular data and ignore unrelated content."
-)
+
+PROMPT_DIR = Path("prompt")
+prompt_file = PROMPT_DIR / "Cathay_US.md"
+prompt = prompt_file.read_text(encoding="utf-8")
 
 for file in attachments_dir.iterdir():
     if not file.name.startswith("decrypted_") or not file.is_file():
         continue
     res = gemini.generate_response(prompt, file)
+    print(f"Processing {file.name}...{res}")
     if res:
         print(f"Results for {file.name}:\n{res}\n")
