@@ -108,7 +108,7 @@ class Mail:
 class Gemini:
     def __init__(self):
         self.client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-        self.model = "gemini-2.5-pro"
+        self.model = "gemini-2.5-flash"
 
     def generate_response(self, prompt, filepath):
         """Generate a response using Gemini."""
@@ -209,6 +209,5 @@ for file in attachments_dir.iterdir():
     if not file.name.startswith("decrypted_") or not file.is_file():
         continue
     res = gemini.generate_response(prompt, file)
-    print(f"Processing {file.name}...{res}")
     if res:
         print(f"Results for {file.name}:\n{res}\n")
