@@ -1,3 +1,5 @@
 .env
 *.json
 *.pdf
+node_modules/
+attachments/*
