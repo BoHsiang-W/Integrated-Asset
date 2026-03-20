@@ -1,5 +1,36 @@
-const fetch = require('node-fetch');
 const crypto = require('crypto-js');
+const fetch = globalThis.fetch;
+
+const REQUEST_TIMEOUT_MS = 10000;
+
+async function fetchJson(url, options, exchangeName) {
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      console.error(`${exchangeName} request failed: HTTP ${response.status} ${response.statusText}`);
+      return null;
+    }
+
+    try {
+      return await response.json();
+    } catch (error) {
+      console.error(`${exchangeName} returned an invalid JSON response:`, error.message);
+      return null;
+    }
+  } catch (error) {
+    if (error.name === 'TimeoutError') {
+      console.error(`${exchangeName} request timed out after ${REQUEST_TIMEOUT_MS}ms`);
+      return null;
+    }
+
+    console.error(`${exchangeName} request failed:`, error.message);
+    return null;
+  }
+}
 
 async function getOKXAccountBalance(apiKey, secretKey, passphrase) {
   const timestamp = new Date().toISOString();
@@ -25,13 +56,24 @@ async function getOKXAccountBalance(apiKey, secretKey, passphrase) {
 
   // Make request
   const url = 'https://www.okx.com' + requestPath;
-  const response = await fetch(url, { method, headers });
-  const data = await response.json();
+  const data = await fetchJson(url, { method, headers }, 'OKX');
+
+  if (!data) {
+    return null;
+  }
+
+  // console.log("OKX Response:", data);
 
   if (data.code === '0') {
-    // console.log('Account balance:', data.data);
-    console.log('USDT Balance:', data.data[0].amt);
-    return data.data[0].amt;
+    const balance = data.data?.[0]?.amt;
+
+    if (balance == null) {
+      console.error('OKX returned no USDT savings balance.');
+      return null;
+    }
+
+    console.log('OKX USDT Balance:', balance);
+    return balance;
   } else {
     console.error('Error:', data.msg);
     return null;
@@ -64,12 +106,22 @@ async function getBitgetAccountBalance(apiKey, secretKey, passphrase) {
 
   // Make request
   const url = 'https://api.bitget.com' + requestPath;
-  const response = await fetch(url, { method, headers });
-  const data = await response.json();
+  const data = await fetchJson(url, { method, headers }, 'Bitget');
+
+  if (!data) {
+    return null;
+  }
+
   if (data.code === '00000') {
-    //   console.log('Account balance:', data.data);
-      console.log('USDT Balance:', data.data[0].amount);
-      return data.data[0].amount;
+    const balance = data.data?.[0]?.amount;
+
+    if (balance == null) {
+      console.error('Bitget returned no USDT earn balance.');
+      return null;
+    }
+
+      console.log('Bitget USDT Balance:', balance);
+      return balance;
   } else {
       console.error('Error:', data.msg);
       return null;
@@ -98,26 +150,39 @@ async function getBinanceAccountBalance(apiKey, secretKey, asset, current = 1, s
 
     const url = `${baseUrl}${path}?${params.toString()}`;
 
-    const response = await fetch(url, {
+  const data = await fetchJson(url, {
         method: 'GET',
         headers: {
             'X-MBX-APIKEY': apiKey,
         },
-    });
+  }, 'Binance');
 
-    const data = await response.json();
+  if (!data) {
+    return null;
+  }
+
+    // console.log("Binance Response:", data);
     // Find the row for the requested asset (default to 'USDT' if not provided)
     const assetName = asset || 'USDT';
-    const assetRow = data.rows.find(row => row.asset === assetName);
+  const assetRow = data.rows?.find(row => row.asset === assetName);
 
     if (assetRow) {
-        console.log(`USDT Balance:`, assetRow.totalAmount);
+        console.log(`Binance USDT Balance:`, assetRow.totalAmount);
     } else {
         console.log(`Asset ${assetName} not found in response.`);
+    return null;
     }
-    return assetRow;
+    return assetRow.totalAmount;
 }
 
-getOKXAccountBalance(OKXapiKey, OKXsecretKey, OKXpassphrase);
-getBitgetAccountBalance(bitgetapiKey, bitgetsecretKey, bitgetpassphrase);
-getBinanceAccountBalance(binanceapiKey, binanceSecretKey);
+require('dotenv').config();
+
+(async () => {
+  const [bitget, binance, okx] = await Promise.all([
+    getBitgetAccountBalance(process.env.BITGET_API_KEY, process.env.BITGET_SECRET_KEY, process.env.BITGET_PASSPHRASE),
+    getBinanceAccountBalance(process.env.BINANCE_API_KEY, process.env.BINANCE_SECRET_KEY),
+    getOKXAccountBalance(process.env.OKX_API_KEY, process.env.OKX_SECRET_KEY, process.env.OKX_PASSPHRASE),
+  ]);
+  console.log(`${bitget}\n${binance}\n${okx}`);
+})();
+
