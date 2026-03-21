@@ -1,4 +1,4 @@
-﻿"""
+"""
 google_file_sync.py — Stock statement pipeline.
 
 Stages:
@@ -51,17 +51,43 @@ TOKEN_FILE = "token.json"
 CREDENTIALS_FILE = "credentials.json"
 
 CSV_FIELDNAMES = [
-    "交易日期", "買/賣/股利", "代號", "股票", "交易類別",
-    "買入股數", "買入價格", "賣出股數", "賣出價格", "收入",
+    "交易日期",
+    "買/賣/股利",
+    "代號",
+    "股票",
+    "交易類別",
+    "買入股數",
+    "買入價格",
+    "賣出股數",
+    "賣出價格",
+    "手續費",
+    "收入",
 ]
 
 # pattern_env: env var holding the filename regex to match broker PDFs
 # password_env: env var holding the PDF decryption password
 # prompt: filename inside PROMPT_DIR for the Gemini prompt
 BROKER_CONFIG: dict[str, dict[str, str]] = {
-    "CATHAY_US": {"pattern_env": "CATHAY_US", "password_env": "PDF_PASSWORD",       "prompt": "Cathay_US.md"},
-    "CATHAY_TW": {"pattern_env": "CATHAY_TW", "password_env": "PDF_PASSWORD",       "prompt": "Cathay_TW.md"},
-    "FUBON_US":  {"pattern_env": "FUBON_US",  "password_env": "FUBON_PDF_PASSWORD", "prompt": "Fubon_US.md"},
+    "CATHAY_US": {
+        "pattern_env": "CATHAY_US",
+        "password_env": "PDF_PASSWORD",
+        "prompt": "Cathay_US.md",
+    },
+    "CATHAY_TW": {
+        "pattern_env": "CATHAY_TW",
+        "password_env": "PDF_PASSWORD",
+        "prompt": "Cathay_TW.md",
+    },
+    "FUBON_US": {
+        "pattern_env": "FUBON_US",
+        "password_env": "FUBON_PDF_PASSWORD",
+        "prompt": "Fubon_US.md",
+    },
+    "TW_dividend": {
+        "pattern_env": "TW_DIVIDEND",
+        "password_env": "PDF_PASSWORD",
+        "prompt": "TW_Dividend.md",
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -75,13 +101,13 @@ class GmailClient:
     def __init__(self) -> None:
         self._service = _build_gmail_service()
 
-    def fetch_attachments(self, query: str = "has:attachment newer_than:7d") -> list[dict]:
+    def fetch_attachments(
+        self, query: str = "has:attachment newer_than:7d"
+    ) -> list[dict]:
         """Return all attachment metadata matching *query* from the inbox."""
         try:
             result = (
-                self._service.users().messages()
-                .list(userId="me", q=query)
-                .execute()
+                self._service.users().messages().list(userId="me", q=query).execute()
             )
         except HttpError as exc:
             print(f"Gmail API error: {exc}")
@@ -95,13 +121,16 @@ class GmailClient:
         attachments: list[dict] = []
         for message in tqdm(messages, desc="Fetching messages"):
             msg = (
-                self._service.users().messages()
+                self._service.users()
+                .messages()
                 .get(userId="me", id=message["id"], format="full")
                 .execute()
             )
             _extract_attachment_parts(
                 msg.get("payload", {}).get("parts", []),
-                self._service, msg, attachments,
+                self._service,
+                msg,
+                attachments,
             )
 
         print(f"Found {len(attachments)} attachments.")
@@ -120,7 +149,9 @@ def _build_gmail_service():
             creds.refresh(Request())
         else:
             # Only run the browser flow when no valid token exists at all
-            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, GMAIL_SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(
+                CREDENTIALS_FILE, GMAIL_SCOPES
+            )
             creds = flow.run_local_server(port=0)
         with open(TOKEN_FILE, "w", encoding="utf-8") as fh:
             fh.write(creds.to_json())
@@ -139,18 +170,22 @@ def _extract_attachment_parts(
         attachment_id = part.get("body", {}).get("attachmentId")
         if part.get("filename") and attachment_id:
             raw = (
-                service.users().messages().attachments()
+                service.users()
+                .messages()
+                .attachments()
                 .get(userId="me", messageId=message["id"], id=attachment_id)
                 .execute()
             )
-            output.append({
-                "filename": part["filename"],
-                "data": raw.get("data"),
-                "mimeType": part.get("mimeType"),
-                "date": datetime.fromtimestamp(
-                    int(message["internalDate"]) / 1000
-                ).strftime("%Y-%m-%d"),
-            })
+            output.append(
+                {
+                    "filename": part["filename"],
+                    "data": raw.get("data"),
+                    "mimeType": part.get("mimeType"),
+                    "date": datetime.fromtimestamp(
+                        int(message["internalDate"]) / 1000
+                    ).strftime("%Y-%m-%d"),
+                }
+            )
         if "parts" in part:
             _extract_attachment_parts(part["parts"], service, message, output)
 
@@ -163,11 +198,13 @@ def _extract_attachment_parts(
 class GeminiClient:
     """Google Gemini API client with automatic rate-limit retry."""
 
-    def __init__(self, model: str = "gemini-3.1-flash-lite-preview") -> None:
+    def __init__(self, model: str = "gemini-2.5-flash") -> None:
         self._client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
         self.model = model
 
-    def analyze_pdf(self, prompt: str, pdf_path: Path, max_retries: int = 5) -> str | None:
+    def analyze_pdf(
+        self, prompt: str, pdf_path: Path, max_retries: int = 5
+    ) -> str | None:
         """Send *pdf_path* and *prompt* to Gemini; return the text response or ``None``."""
         for attempt in range(1, max_retries + 1):
             try:
@@ -187,7 +224,9 @@ class GeminiClient:
                     print(f"  Gemini error: {exc}")
                     return None
                 wait = _parse_retry_delay(str(exc), attempt)
-                print(f"  Rate limited (attempt {attempt}/{max_retries}), retrying in {wait:.0f}s...")
+                print(
+                    f"  Rate limited (attempt {attempt}/{max_retries}), retrying in {wait:.0f}s..."
+                )
                 time.sleep(wait)
 
         print(f"  Failed after {max_retries} retries.")
@@ -260,7 +299,12 @@ def _normalize_rows(rows: list[dict]) -> list[dict]:
         for key in [k for k in row if k is None]:
             raw = row.pop(key)
             val = str(raw[0] if isinstance(raw, list) else raw or "").strip()
-            if val and not row.get("收入", "").strip():
+            if val:
+                # Trailing-comma overflow: the overflow value is the intended 收入.
+                # If 收入 already holds a shifted value, move it to 手續費.
+                cur_income = row.get("收入", "").strip()
+                if cur_income and not row.get("手續費", "").strip():
+                    row["手續費"] = cur_income
                 row["收入"] = val
         for key in row:
             if row[key] is None:
@@ -277,7 +321,13 @@ def _dedup_and_sort(rows: list[dict]) -> list[dict]:
         if key not in seen:
             seen.add(key)
             unique.append(row)
-    unique.sort(key=lambda r: (r.get("交易日期", ""), r.get("代號", ""), r.get("買/賣/股利", "")))
+    unique.sort(
+        key=lambda r: (
+            r.get("交易日期", ""),
+            r.get("代號", ""),
+            r.get("買/賣/股利", ""),
+        )
+    )
     return unique
 
 
@@ -292,7 +342,9 @@ def _read_existing_csv(path: Path) -> list[dict]:
 def _write_csv(path: Path, rows: list[dict]) -> None:
     """Write *rows* to *path* as UTF-8-BOM CSV using the canonical field order."""
     with open(path, "w", newline="", encoding="utf-8-sig") as fh:
-        writer = csv.DictWriter(fh, fieldnames=CSV_FIELDNAMES, extrasaction="ignore")
+        writer = csv.DictWriter(
+            fh, fieldnames=CSV_FIELDNAMES, extrasaction="ignore", restval=""
+        )
         writer.writeheader()
         writer.writerows(rows)
 
@@ -315,7 +367,8 @@ def _build_pattern_map(value_key: str) -> dict[str, Any]:
         if not pattern:
             continue
         result[pattern] = (
-            os.getenv(cfg[value_key]) if value_key == "password_env"
+            os.getenv(cfg[value_key])
+            if value_key == "password_env"
             else PROMPT_DIR / cfg[value_key]
         )
     return result
@@ -358,8 +411,10 @@ def fetch_attachments_stage() -> None:
     """Stage 1 — Download matching statement PDFs from Gmail."""
     patterns = [os.getenv(cfg["pattern_env"]) for cfg in BROKER_CONFIG.values()]
     attachments = GmailClient().fetch_attachments()
+
     matching = [
-        att for att in attachments
+        att
+        for att in attachments
         if any(p and re.search(p, att["filename"]) for p in patterns)
     ]
     if matching:
@@ -382,14 +437,15 @@ def decrypt_pdfs_stage() -> None:
             print(f"  No password matched for {file.name}, skipping.")
 
 
-def analyze_pdfs_stage() -> None:
+def analyze_pdfs_stage(*, debug: bool = False) -> None:
     """Stage 3 — Analyze decrypted PDFs with Gemini and merge results into transactions.csv."""
     prompt_map = _build_pattern_map("prompt")
     gemini = GeminiClient()
     processed = _load_processed()
 
     decrypted = sorted(
-        f for f in ATTACHMENTS_DIR.iterdir()
+        f
+        for f in ATTACHMENTS_DIR.iterdir()
         if f.name.startswith("decrypted_") and f.is_file()
     )
     new_files = [f for f in decrypted if f.name not in processed]
@@ -399,7 +455,9 @@ def analyze_pdfs_stage() -> None:
         return
 
     skipped = len(decrypted) - len(new_files)
-    print(f"{len(new_files)} new file(s) to process (skipping {skipped} already processed)")
+    print(
+        f"{len(new_files)} new file(s) to process (skipping {skipped} already processed)"
+    )
 
     new_rows: list[dict] = []
     for idx, file in enumerate(new_files, start=1):
@@ -414,7 +472,15 @@ def analyze_pdfs_stage() -> None:
             print("  No response from Gemini.")
             continue
 
+        if debug:
+            print(f"  --- RAW GEMINI RESPONSE ---\n{raw}\n  --- END RAW RESPONSE ---")
+
         rows = _parse_csv_response(raw)
+
+        if debug:
+            for i, r in enumerate(rows, 1):
+                print(f"  [parsed row {i}] {dict(r)}")
+
         if rows:
             new_rows.extend(rows)
             processed.add(file.name)
@@ -453,9 +519,20 @@ def _parse_args() -> argparse.Namespace:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--fetch",   action="store_true", help="Stage 1: Fetch attachments from Gmail")
-    parser.add_argument("--decrypt", action="store_true", help="Stage 2: Decrypt PDF attachments")
-    parser.add_argument("--analyze", action="store_true", help="Stage 3: Analyze PDFs with Gemini")
+    parser.add_argument(
+        "--fetch", action="store_true", help="Stage 1: Fetch attachments from Gmail"
+    )
+    parser.add_argument(
+        "--decrypt", action="store_true", help="Stage 2: Decrypt PDF attachments"
+    )
+    parser.add_argument(
+        "--analyze", action="store_true", help="Stage 3: Analyze PDFs with Gemini"
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print raw Gemini responses and parsed rows",
+    )
     return parser.parse_args()
 
 
@@ -474,4 +551,4 @@ if __name__ == "__main__":
 
     if run_all or args.analyze:
         print("=== Stage 3: Analyzing with Gemini ===")
-        analyze_pdfs_stage()
+        analyze_pdfs_stage(debug=args.debug)
