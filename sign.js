@@ -1,4 +1,6 @@
 const crypto = require('crypto-js');
+const fs = require('fs');
+const path = require('path');
 const fetch = globalThis.fetch;
 
 const REQUEST_TIMEOUT_MS = 10000;
@@ -11,7 +13,8 @@ async function fetchJson(url, options, exchangeName) {
     });
 
     if (!response.ok) {
-      console.error(`${exchangeName} request failed: HTTP ${response.status} ${response.statusText}`);
+      const errorBody = await response.text().catch(() => '');
+      console.error(`${exchangeName} request failed: HTTP ${response.status} ${response.statusText}`, errorBody);
       return null;
     }
 
@@ -32,69 +35,17 @@ async function fetchJson(url, options, exchangeName) {
   }
 }
 
-async function getOKXAccountBalance(apiKey, secretKey, passphrase) {
-  const timestamp = new Date().toISOString();
-  const method = 'GET';
-  const requestPath = '/api/v5/finance/savings/balance?ccy=USDT';
+// ---------------------------------------------------------------------------
+// Bitget shared auth
+// ---------------------------------------------------------------------------
+
+async function bitgetRequest(apiKey, secretKey, passphrase, method, requestPath, label) {
+  const timestamp = Date.now().toString();
   const body = '';
-
-  // Create the prehash string
   const prehash = timestamp + method + requestPath + body;
-
-  // Generate the signature
   const hash = crypto.HmacSHA256(prehash, secretKey);
   const signature = crypto.enc.Base64.stringify(hash);
 
-  // Build headers
-  const headers = {
-    'OK-ACCESS-KEY': apiKey,
-    'OK-ACCESS-SIGN': signature,
-    'OK-ACCESS-TIMESTAMP': timestamp,
-    'OK-ACCESS-PASSPHRASE': passphrase,
-    'Content-Type': 'application/json'
-  };
-
-  // Make request
-  const url = 'https://www.okx.com' + requestPath;
-  const data = await fetchJson(url, { method, headers }, 'OKX');
-
-  if (!data) {
-    return null;
-  }
-
-  // console.log("OKX Response:", data);
-
-  if (data.code === '0') {
-    const balance = data.data?.[0]?.amt;
-
-    if (balance == null) {
-      console.error('OKX returned no USDT savings balance.');
-      return null;
-    }
-
-    console.log('OKX USDT Balance:', balance);
-    return balance;
-  } else {
-    console.error('Error:', data.msg);
-    return null;
-  }
-}
-
-
-async function getBitgetAccountBalance(apiKey, secretKey, passphrase) {
-  const timestamp = new Date().toISOString();
-  const method = 'GET';
-  const requestPath = '/api/v2/earn/account/assets?coin=USDT';
-  const body = '';
-
-  // Create the prehash string
-  const prehash = timestamp + method + requestPath + body;
-
-  // Generate the signature
-  const hash = crypto.HmacSHA256(prehash, secretKey);
-  const signature = crypto.enc.Base64.stringify(hash);
-
-  // Build headers
   const headers = {
     'ACCESS-KEY': apiKey,
     'ACCESS-SIGN': signature,
@@ -104,85 +55,170 @@ async function getBitgetAccountBalance(apiKey, secretKey, passphrase) {
     'Content-Type': 'application/json'
   };
 
-  // Make request
   const url = 'https://api.bitget.com' + requestPath;
-  const data = await fetchJson(url, { method, headers }, 'Bitget');
+  const data = await fetchJson(url, { method, headers }, label);
 
-  if (!data) {
-    return null;
-  }
+  if (!data) return null;
+  if (data.code === '00000') return data.data;
+  console.error(`${label} Error:`, data.msg);
+  return null;
+}
 
-  if (data.code === '00000') {
-    const balance = data.data?.[0]?.amount;
+// ---------------------------------------------------------------------------
+// Exchange API functions
+// ---------------------------------------------------------------------------
 
+async function getOKXAccountBalance(apiKey, secretKey, passphrase) {
+  const timestamp = new Date().toISOString();
+  const method = 'GET';
+  const requestPath = '/api/v5/finance/savings/balance?ccy=USDT';
+
+  const prehash = timestamp + method + requestPath;
+  const hash = crypto.HmacSHA256(prehash, secretKey);
+  const signature = crypto.enc.Base64.stringify(hash);
+
+  const headers = {
+    'OK-ACCESS-KEY': apiKey,
+    'OK-ACCESS-SIGN': signature,
+    'OK-ACCESS-TIMESTAMP': timestamp,
+    'OK-ACCESS-PASSPHRASE': passphrase,
+    'Content-Type': 'application/json'
+  };
+
+  const url = 'https://www.okx.com' + requestPath;
+  const data = await fetchJson(url, { method, headers }, 'OKX');
+
+  if (!data) return null;
+
+  if (data.code === '0') {
+    const balance = data.data?.[0]?.amt;
     if (balance == null) {
-      console.error('Bitget returned no USDT earn balance.');
+      console.error('OKX returned no USDT savings balance.');
       return null;
     }
-
-      console.log('Bitget USDT Balance:', balance);
-      return balance;
+    console.log('OKX USDT Balance:', balance);
+    return balance;
   } else {
-      console.error('Error:', data.msg);
-      return null;
+    console.error('OKX Error:', data.msg);
+    return null;
   }
 }
 
+async function getBitgetAccountBalance(apiKey, secretKey, passphrase) {
+  const result = await bitgetRequest(apiKey, secretKey, passphrase, 'GET', '/api/v2/earn/account/assets?coin=USDT', 'Bitget');
+  const balance = result?.[0]?.amount;
+  if (balance == null) {
+    console.error('Bitget returned no USDT earn balance.');
+    return null;
+  }
+  console.log('Bitget USDT Balance:', balance);
+  return balance;
+}
 
+async function getBitgetTradeHistory(apiKey, secretKey, passphrase, symbol, { after, before, limit = '100' } = {}) {
+  const queryParams = new URLSearchParams({ symbol, limit });
+  if (after) queryParams.set('after', after);
+  if (before) queryParams.set('before', before);
+  const requestPath = '/api/v2/spot/trade/history-orders?' + queryParams.toString();
+
+  const result = await bitgetRequest(apiKey, secretKey, passphrase, 'GET', requestPath, 'Bitget Trade History');
+  if (!result) return null;
+
+  const trades = result.map(t => ({
+    symbol: t.symbol,
+    priceAvg: t.priceAvg,
+    quoteVolume: t.quoteVolume,
+    uTime: new Date(Number(t.uTime)).toLocaleDateString('sv-SE').replace(/-/g, '/'),
+  }));
+  console.log(`Bitget Trade History (${symbol}): ${trades.length} trade(s)`);
+  return trades;
+}
 
 async function getBinanceAccountBalance(apiKey, secretKey, asset, current = 1, size = 10) {
-    const baseUrl = 'https://api.binance.com';
-    const path = '/sapi/v1/simple-earn/flexible/position';
-    const timestamp = Date.now();
+  const baseUrl = 'https://api.binance.com';
+  const apiPath = '/sapi/v1/simple-earn/flexible/position';
+  const timestamp = Date.now();
 
-    // Build query string
-    const params = new URLSearchParams({
-        timestamp: timestamp.toString(),
-        asset: asset || '',
-        current: current.toString(),
-        size: size.toString(),
-    });
+  const params = new URLSearchParams({
+    timestamp: timestamp.toString(),
+    asset: asset || '',
+    current: current.toString(),
+    size: size.toString(),
+  });
 
-    // Create signature using HMAC SHA256 (using crypto-js)
-    const signature = crypto.HmacSHA256(params.toString(), secretKey).toString(crypto.enc.Hex);
+  const signature = crypto.HmacSHA256(params.toString(), secretKey).toString(crypto.enc.Hex);
+  params.append('signature', signature);
 
-    params.append('signature', signature);
-
-    const url = `${baseUrl}${path}?${params.toString()}`;
-
+  const url = `${baseUrl}${apiPath}?${params.toString()}`;
   const data = await fetchJson(url, {
-        method: 'GET',
-        headers: {
-            'X-MBX-APIKEY': apiKey,
-        },
+    method: 'GET',
+    headers: { 'X-MBX-APIKEY': apiKey },
   }, 'Binance');
 
-  if (!data) {
-    return null;
-  }
+  if (!data) return null;
 
-    // console.log("Binance Response:", data);
-    // Find the row for the requested asset (default to 'USDT' if not provided)
-    const assetName = asset || 'USDT';
+  const assetName = asset || 'USDT';
   const assetRow = data.rows?.find(row => row.asset === assetName);
-
-    if (assetRow) {
-        console.log(`Binance USDT Balance:`, assetRow.totalAmount);
-    } else {
-        console.log(`Asset ${assetName} not found in response.`);
-    return null;
-    }
+  if (assetRow) {
+    console.log(`Binance USDT Balance:`, assetRow.totalAmount);
     return assetRow.totalAmount;
+  }
+  console.log(`Asset ${assetName} not found in response.`);
+  return null;
 }
+
+// ---------------------------------------------------------------------------
+// CSV helpers
+// ---------------------------------------------------------------------------
+
+const CSV_PATH = path.join(__dirname, 'attachments', 'transactions.csv');
+const CSV_HEADER = '交易日期,買/賣/股利,代號,股票,交易類別,買入股數,買入價格,賣出股數,賣出價格,手續費,收入';
+
+function readCsvRows() {
+  if (!fs.existsSync(CSV_PATH)) return [];
+  const lines = fs.readFileSync(CSV_PATH, 'utf-8').replace(/^\uFEFF/, '').trim().split('\n');
+  return lines.slice(1).filter(l => l.trim());
+}
+
+function writeCsv(rows) {
+  rows.sort();
+  const deduped = [...new Set(rows)];
+  fs.writeFileSync(CSV_PATH, '\uFEFF' + CSV_HEADER + '\n' + deduped.join('\n') + '\n', 'utf-8');
+  console.log(`Saved ${CSV_PATH} (${deduped.length} rows)`);
+}
+
+function tradesToCsvRows(trades) {
+  return trades.map(t => {
+    const qty = (parseFloat(t.quoteVolume) / parseFloat(t.priceAvg)).toFixed(6);
+    const price = parseFloat(t.priceAvg).toFixed(6);
+    return `${t.uTime},買,${t.symbol},${t.symbol},Crypto,${qty},${price},,,,`;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
 
 require('dotenv').config();
 
+const BITGET_SYMBOLS = ['BTCUSDT', 'ETHUSDT'];
+
 (async () => {
-  const [bitget, binance, okx] = await Promise.all([
-    getBitgetAccountBalance(process.env.BITGET_API_KEY, process.env.BITGET_SECRET_KEY, process.env.BITGET_PASSPHRASE),
-    getBinanceAccountBalance(process.env.BINANCE_API_KEY, process.env.BINANCE_SECRET_KEY),
-    getOKXAccountBalance(process.env.OKX_API_KEY, process.env.OKX_SECRET_KEY, process.env.OKX_PASSPHRASE),
+  const { BITGET_API_KEY, BITGET_SECRET_KEY, BITGET_PASSPHRASE,
+          BINANCE_API_KEY, BINANCE_SECRET_KEY,
+          OKX_API_KEY, OKX_SECRET_KEY, OKX_PASSPHRASE } = process.env;
+
+  const [bitget, binance, okx, ...tradeResults] = await Promise.all([
+    getBitgetAccountBalance(BITGET_API_KEY, BITGET_SECRET_KEY, BITGET_PASSPHRASE),
+    getBinanceAccountBalance(BINANCE_API_KEY, BINANCE_SECRET_KEY),
+    getOKXAccountBalance(OKX_API_KEY, OKX_SECRET_KEY, OKX_PASSPHRASE),
+    ...BITGET_SYMBOLS.map(s => getBitgetTradeHistory(BITGET_API_KEY, BITGET_SECRET_KEY, BITGET_PASSPHRASE, s, { limit: '100' })),
   ]);
   console.log(`${bitget}\n${binance}\n${okx}`);
-})();
 
+  const allTrades = tradeResults.filter(Boolean).flat();
+  if (allTrades.length) {
+    const existing = readCsvRows();
+    writeCsv([...existing, ...tradesToCsvRows(allTrades)]);
+  }
+})();
