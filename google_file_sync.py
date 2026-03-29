@@ -1,15 +1,28 @@
 """
-google_file_sync.py — Stock statement pipeline.
+google_file_sync.py — Shared infrastructure & CLI entry point.
 
-Stages:
-  1. Fetch   — Download matching PDF attachments from Gmail.
-  2. Decrypt — Decrypt password-protected PDFs per broker.
-  3. Analyze — Send decrypted PDFs to Gemini and write transactions.csv.
+Shared:
+  Gmail client, Gemini client, PDF helpers, CSV helpers,
+  pattern-matching, processed-file tracking, fetch/decrypt primitives.
+
+Pipelines (in separate modules):
+  stock_pipeline.py — Stock / ETF / dividend stages
+  card_pipeline.py  — Credit-card statement stages
+
+Directory layout:
+  attachments/stock/raw/        — downloaded stock PDFs
+  attachments/stock/decrypted/  — decrypted stock PDFs
+  attachments/stock/*.csv       — stock analysis output
+  attachments/card/raw/         — downloaded card PDFs
+  attachments/card/decrypted/   — decrypted card PDFs
+  attachments/card/*.csv        — card analysis output
 
 Usage:
-  python google_file_sync.py              # run all stages
+  python google_file_sync.py              # run all stages (stock only, last 7 days)
   python google_file_sync.py --analyze    # only Stage 3
-  python google_file_sync.py --decrypt --analyze
+  python google_file_sync.py --since 2026/01/01  # fetch emails after a specific date
+  python google_file_sync.py --card       # credit card pipeline (fetch+decrypt+analyze)
+  python google_file_sync.py --card --analyze    # card analyze only (skip fetch/decrypt)
 """
 
 from __future__ import annotations
@@ -21,7 +34,7 @@ import json
 import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -43,52 +56,14 @@ from tqdm import tqdm
 
 ATTACHMENTS_DIR = Path("attachments")
 PROMPT_DIR = Path("prompt")
-PROCESSED_FILE = ATTACHMENTS_DIR / ".processed.json"
-CSV_OUTPUT = ATTACHMENTS_DIR / "transactions.csv"
 
-GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/spreadsheets",
+]
 TOKEN_FILE = "token.json"
 CREDENTIALS_FILE = "credentials.json"
 
-CSV_FIELDNAMES = [
-    "交易日期",
-    "買/賣/股利",
-    "代號",
-    "股票",
-    "交易類別",
-    "買入股數",
-    "買入價格",
-    "賣出股數",
-    "賣出價格",
-    "手續費",
-    "收入",
-]
-
-# pattern_env: env var holding the filename regex to match broker PDFs
-# password_env: env var holding the PDF decryption password
-# prompt: filename inside PROMPT_DIR for the Gemini prompt
-BROKER_CONFIG: dict[str, dict[str, str]] = {
-    "CATHAY_US": {
-        "pattern_env": "CATHAY_US",
-        "password_env": "PDF_PASSWORD",
-        "prompt": "Cathay_US.md",
-    },
-    "CATHAY_TW": {
-        "pattern_env": "CATHAY_TW",
-        "password_env": "PDF_PASSWORD",
-        "prompt": "Cathay_TW.md",
-    },
-    "FUBON_US": {
-        "pattern_env": "FUBON_US",
-        "password_env": "FUBON_PDF_PASSWORD",
-        "prompt": "Fubon_US.md",
-    },
-    "TW_dividend": {
-        "pattern_env": "TW_DIVIDEND",
-        "password_env": "PDF_PASSWORD",
-        "prompt": "TW_Dividend.md",
-    },
-}
 
 # ---------------------------------------------------------------------------
 # Gmail
@@ -102,7 +77,7 @@ class GmailClient:
         self._service = _build_gmail_service()
 
     def fetch_attachments(
-        self, query: str = "has:attachment newer_than:7d"
+        self, query: str = "has:attachment"
     ) -> list[dict]:
         """Return all attachment metadata matching *query* from the inbox."""
         try:
@@ -137,26 +112,30 @@ class GmailClient:
         return attachments
 
 
-def _build_gmail_service():
-    """Authenticate via OAuth2 and return a Gmail API service object."""
+def _get_credentials() -> Credentials:
+    """Return valid OAuth2 credentials, refreshing or re-authorizing as needed."""
     creds: Credentials | None = None
 
     if os.path.exists(TOKEN_FILE):
-        creds = Credentials.from_authorized_user_file(TOKEN_FILE, GMAIL_SCOPES)
+        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            # Only run the browser flow when no valid token exists at all
             flow = InstalledAppFlow.from_client_secrets_file(
-                CREDENTIALS_FILE, GMAIL_SCOPES
+                CREDENTIALS_FILE, SCOPES
             )
             creds = flow.run_local_server(port=0)
         with open(TOKEN_FILE, "w", encoding="utf-8") as fh:
             fh.write(creds.to_json())
 
-    return build("gmail", "v1", credentials=creds)
+    return creds
+
+
+def _build_gmail_service():
+    """Authenticate via OAuth2 and return a Gmail API service object."""
+    return build("gmail", "v1", credentials=_get_credentials())
 
 
 def _extract_attachment_parts(
@@ -188,6 +167,97 @@ def _extract_attachment_parts(
             )
         if "parts" in part:
             _extract_attachment_parts(part["parts"], service, message, output)
+
+
+# ---------------------------------------------------------------------------
+# Google Sheets
+# ---------------------------------------------------------------------------
+
+
+class SheetsClient:
+    """Authenticated Google Sheets API client."""
+
+    def __init__(self) -> None:
+        self._service = build("sheets", "v4", credentials=_get_credentials())
+
+    def read_rows(
+        self, spreadsheet_id: str, range_: str
+    ) -> list[list[str]]:
+        """Read values from a sheet range. Returns a list of rows."""
+        result = (
+            self._service.spreadsheets()
+            .values()
+            .get(spreadsheetId=spreadsheet_id, range=range_)
+            .execute()
+        )
+        return result.get("values", [])
+
+    def append_rows(
+        self, spreadsheet_id: str, range_: str, rows: list[list]
+    ) -> int:
+        """Append *rows* after the last row in *range_*. Returns appended count."""
+        body = {"values": rows}
+        result = (
+            self._service.spreadsheets()
+            .values()
+            .append(
+                spreadsheetId=spreadsheet_id,
+                range=range_,
+                valueInputOption="USER_ENTERED",
+                insertDataOption="INSERT_ROWS",
+                body=body,
+            )
+            .execute()
+        )
+        return result.get("updates", {}).get("updatedRows", 0)
+
+    def get_sheet_id(self, spreadsheet_id: str, sheet_name: str) -> int | None:
+        """Get the numeric sheet ID for a named sheet tab."""
+        meta = (
+            self._service.spreadsheets()
+            .get(spreadsheetId=spreadsheet_id, fields="sheets.properties")
+            .execute()
+        )
+        for sheet in meta.get("sheets", []):
+            props = sheet.get("properties", {})
+            if props.get("title") == sheet_name:
+                return props.get("sheetId")
+        return None
+
+    def insert_rows_at(
+        self, spreadsheet_id: str, sheet_id: int, row_index: int, count: int
+    ) -> None:
+        """Insert *count* blank rows at *row_index* (0-based)."""
+        body = {
+            "requests": [
+                {
+                    "insertDimension": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "dimension": "ROWS",
+                            "startIndex": row_index,
+                            "endIndex": row_index + count,
+                        },
+                        "inheritFromBefore": True,
+                    }
+                }
+            ]
+        }
+        self._service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id, body=body
+        ).execute()
+
+    def update_range(
+        self, spreadsheet_id: str, range_: str, rows: list[list]
+    ) -> None:
+        """Write *rows* to a specific range (overwrite existing values)."""
+        body = {"values": rows}
+        self._service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=range_,
+            valueInputOption="USER_ENTERED",
+            body=body,
+        ).execute()
 
 
 # ---------------------------------------------------------------------------
@@ -257,9 +327,10 @@ def save_attachments(attachments: list[dict], folder: Path) -> None:
         dest.write_bytes(base64.urlsafe_b64decode(att["data"].encode("UTF-8")))
 
 
-def decrypt_pdf(source: Path, password: str) -> None:
-    """Decrypt *source* with *password* and write ``decrypted_<name>`` alongside it."""
-    dest = source.parent / f"decrypted_{source.name}"
+def decrypt_pdf(source: Path, password: str, dest_dir: Path) -> None:
+    """Decrypt *source* with *password* and write ``decrypted_<name>`` into *dest_dir*."""
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f"decrypted_{source.name}"
     try:
         reader = PdfReader(source)
         if reader.is_encrypted:
@@ -278,60 +349,14 @@ def decrypt_pdf(source: Path, password: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _parse_csv_response(text: str) -> list[dict]:
+def parse_csv_response(text: str) -> list[dict]:
     """Parse a (possibly markdown-fenced) CSV string from Gemini into row dicts."""
     cleaned = re.sub(r"```(?:csv)?\n?", "", text).strip()
     reader = csv.DictReader(StringIO(cleaned))
     return [row for row in reader if any(v and v.strip() for v in row.values())]
 
 
-def _normalize_rows(rows: list[dict]) -> list[dict]:
-    """
-    Sanitize rows produced by ``csv.DictReader``:
-
-    - Gemini occasionally outputs an extra trailing comma, causing ``DictReader``
-      to place the overflow value under a ``None`` key as a list.  If ``收入`` is
-      empty, rescue that value into ``收入``.
-    - Delete all remaining ``None`` keys.
-    - Replace any remaining ``None`` values with empty strings.
-    """
-    for row in rows:
-        for key in [k for k in row if k is None]:
-            raw = row.pop(key)
-            val = str(raw[0] if isinstance(raw, list) else raw or "").strip()
-            if val:
-                # Trailing-comma overflow: the overflow value is the intended 收入.
-                # If 收入 already holds a shifted value, move it to 手續費.
-                cur_income = row.get("收入", "").strip()
-                if cur_income and not row.get("手續費", "").strip():
-                    row["手續費"] = cur_income
-                row["收入"] = val
-        for key in row:
-            if row[key] is None:
-                row[key] = ""
-    return rows
-
-
-def _dedup_and_sort(rows: list[dict]) -> list[dict]:
-    """Remove exact duplicates and sort by date -> ticker -> trade type."""
-    seen: set[tuple] = set()
-    unique: list[dict] = []
-    for row in rows:
-        key = tuple(row.get(f, "") for f in CSV_FIELDNAMES)
-        if key not in seen:
-            seen.add(key)
-            unique.append(row)
-    unique.sort(
-        key=lambda r: (
-            r.get("交易日期", ""),
-            r.get("代號", ""),
-            r.get("買/賣/股利", ""),
-        )
-    )
-    return unique
-
-
-def _read_existing_csv(path: Path) -> list[dict]:
+def read_existing_csv(path: Path) -> list[dict]:
     """Return rows from an existing CSV file, or an empty list if it does not exist."""
     if not path.exists() or path.stat().st_size == 0:
         return []
@@ -339,11 +364,11 @@ def _read_existing_csv(path: Path) -> list[dict]:
         return list(csv.DictReader(fh))
 
 
-def _write_csv(path: Path, rows: list[dict]) -> None:
-    """Write *rows* to *path* as UTF-8-BOM CSV using the canonical field order."""
+def write_csv(path: Path, rows: list[dict], fieldnames: list[str]) -> None:
+    """Write *rows* to *path* as UTF-8-BOM CSV using the given field order."""
     with open(path, "w", newline="", encoding="utf-8-sig") as fh:
         writer = csv.DictWriter(
-            fh, fieldnames=CSV_FIELDNAMES, extrasaction="ignore", restval=""
+            fh, fieldnames=fieldnames, extrasaction="ignore", restval=""
         )
         writer.writeheader()
         writer.writerows(rows)
@@ -354,27 +379,7 @@ def _write_csv(path: Path, rows: list[dict]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _build_pattern_map(value_key: str) -> dict[str, Any]:
-    """
-    Build a {filename_regex: value} mapping from BROKER_CONFIG.
-
-    value_key is "password_env" (resolves env var -> password string)
-    or "prompt" (resolves to a Path).
-    """
-    result: dict[str, Any] = {}
-    for cfg in BROKER_CONFIG.values():
-        pattern = os.getenv(cfg["pattern_env"])
-        if not pattern:
-            continue
-        result[pattern] = (
-            os.getenv(cfg[value_key])
-            if value_key == "password_env"
-            else PROMPT_DIR / cfg[value_key]
-        )
-    return result
-
-
-def _match_pattern(filename: str, mapping: dict[str, Any]) -> Any | None:
+def match_pattern(filename: str, mapping: dict[str, Any]) -> Any | None:
     """Return the value whose key (regex) matches *filename*, or ``None``."""
     for pattern, value in mapping.items():
         if pattern and re.search(pattern, filename):
@@ -387,30 +392,37 @@ def _match_pattern(filename: str, mapping: dict[str, Any]) -> Any | None:
 # ---------------------------------------------------------------------------
 
 
-def _load_processed() -> set[str]:
+def load_processed(path: Path) -> set[str]:
     """Load the set of already-analyzed filenames from disk."""
-    if PROCESSED_FILE.exists():
-        return set(json.loads(PROCESSED_FILE.read_text(encoding="utf-8")))
+    if path.exists():
+        return set(json.loads(path.read_text(encoding="utf-8")))
     return set()
 
 
-def _save_processed(processed: set[str]) -> None:
+def save_processed(processed: set[str], path: Path) -> None:
     """Persist the set of analyzed filenames to disk."""
-    PROCESSED_FILE.write_text(
+    path.write_text(
         json.dumps(sorted(processed), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
 
 # ---------------------------------------------------------------------------
-# Pipeline stages
+# Shared fetch stage
 # ---------------------------------------------------------------------------
 
 
-def fetch_attachments_stage() -> None:
-    """Stage 1 — Download matching statement PDFs from Gmail."""
-    patterns = [os.getenv(cfg["pattern_env"]) for cfg in BROKER_CONFIG.values()]
-    attachments = GmailClient().fetch_attachments()
+def fetch_attachments_stage(
+    config: dict[str, dict[str, str]],
+    raw_dir: Path,
+    since: str | None = None,
+) -> None:
+    """Download matching PDF attachments from Gmail using *config* patterns."""
+    if not since:
+        since = (datetime.now() - timedelta(days=7)).strftime("%Y/%m/%d")
+    query = f"has:attachment after:{since}"
+    patterns = [os.getenv(cfg["pattern_env"]) for cfg in config.values()]
+    attachments = GmailClient().fetch_attachments(query=query)
 
     matching = [
         att
@@ -418,89 +430,10 @@ def fetch_attachments_stage() -> None:
         if any(p and re.search(p, att["filename"]) for p in patterns)
     ]
     if matching:
-        save_attachments(matching, ATTACHMENTS_DIR)
-        print(f"Saved {len(matching)} attachments to {ATTACHMENTS_DIR}")
+        save_attachments(matching, raw_dir)
+        print(f"Saved {len(matching)} attachments to {raw_dir}")
     else:
         print("No matching statements found.")
-
-
-def decrypt_pdfs_stage() -> None:
-    """Stage 2 — Decrypt each unprocessed PDF using its broker-specific password."""
-    password_map = _build_pattern_map("password_env")
-    for file in ATTACHMENTS_DIR.iterdir():
-        if file.name.startswith("decrypted_") or not file.is_file():
-            continue
-        password = _match_pattern(file.name, password_map)
-        if password:
-            decrypt_pdf(file, password)
-        else:
-            print(f"  No password matched for {file.name}, skipping.")
-
-
-def analyze_pdfs_stage(*, debug: bool = False) -> None:
-    """Stage 3 — Analyze decrypted PDFs with Gemini and merge results into transactions.csv."""
-    prompt_map = _build_pattern_map("prompt")
-    gemini = GeminiClient()
-    processed = _load_processed()
-
-    decrypted = sorted(
-        f
-        for f in ATTACHMENTS_DIR.iterdir()
-        if f.name.startswith("decrypted_") and f.is_file()
-    )
-    new_files = [f for f in decrypted if f.name not in processed]
-
-    if not new_files:
-        print("All files already processed. Nothing new to analyze.")
-        return
-
-    skipped = len(decrypted) - len(new_files)
-    print(
-        f"{len(new_files)} new file(s) to process (skipping {skipped} already processed)"
-    )
-
-    new_rows: list[dict] = []
-    for idx, file in enumerate(new_files, start=1):
-        print(f"[{idx}/{len(new_files)}] Processing: {file.name}")
-        prompt_path = _match_pattern(file.name, prompt_map)
-        if not prompt_path:
-            print(f"  No matching prompt for {file.name}, skipping.")
-            continue
-
-        raw = gemini.analyze_pdf(prompt_path.read_text(encoding="utf-8"), file)
-        if not raw:
-            print("  No response from Gemini.")
-            continue
-
-        if debug:
-            print(f"  --- RAW GEMINI RESPONSE ---\n{raw}\n  --- END RAW RESPONSE ---")
-
-        rows = _parse_csv_response(raw)
-
-        if debug:
-            for i, r in enumerate(rows, 1):
-                print(f"  [parsed row {i}] {dict(r)}")
-
-        if rows:
-            new_rows.extend(rows)
-            processed.add(file.name)
-            print(f"  Done. ({len(rows)} rows)")
-        else:
-            print("  No data rows parsed.")
-
-    if not new_rows:
-        print("No new results to save.")
-        return
-
-    all_rows = _read_existing_csv(CSV_OUTPUT) + new_rows
-    all_rows = [r for r in all_rows if any(str(v).strip() for v in r.values())]
-    all_rows = _normalize_rows(all_rows)
-    unique_rows = _dedup_and_sort(all_rows)
-
-    _write_csv(CSV_OUTPUT, unique_rows)
-    dupes = len(all_rows) - len(unique_rows)
-    print(f"\nSaved {CSV_OUTPUT} ({len(unique_rows)} rows, {dupes} duplicates removed)")
-    _save_processed(processed)
 
 
 # ---------------------------------------------------------------------------
@@ -510,12 +443,15 @@ def analyze_pdfs_stage(*, debug: bool = False) -> None:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Stock statement processor — run stages independently.",
+        description="Stock & credit-card statement processor.",
         epilog=(
             "Examples:\n"
-            "  python google_file_sync.py                      # run all stages\n"
-            "  python google_file_sync.py --analyze            # only Gemini analysis\n"
-            "  python google_file_sync.py --decrypt --analyze  # decrypt then analyze\n"
+            "  python google_file_sync.py                          # run all stock stages (last 7 days)\n"
+            "  python google_file_sync.py --since 2026/01/01       # fetch since a specific date\n"
+            "  python google_file_sync.py --analyze                # only Gemini analysis\n"
+            "  python google_file_sync.py --card                   # credit card pipeline\n"
+            "  python google_file_sync.py --card --analyze         # card analyze only\n"
+            "  python google_file_sync.py --sync                    # sync CSV to Google Sheet\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -529,6 +465,22 @@ def _parse_args() -> argparse.Namespace:
         "--analyze", action="store_true", help="Stage 3: Analyze PDFs with Gemini"
     )
     parser.add_argument(
+        "--card",
+        action="store_true",
+        help="Run credit-card pipeline instead of stock pipeline",
+    )
+    parser.add_argument(
+        "--since",
+        type=str,
+        metavar="YYYY/MM/DD",
+        help="Only fetch emails after this date (default: 7 days ago)",
+    )
+    parser.add_argument(
+        "--sync",
+        action="store_true",
+        help="Stage 4: Sync transactions.csv to Google Sheet",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Print raw Gemini responses and parsed rows",
@@ -539,16 +491,45 @@ def _parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     load_dotenv()
     args = _parse_args()
-    run_all = not (args.fetch or args.decrypt or args.analyze)
 
-    if run_all or args.fetch:
-        print("=== Stage 1: Fetching attachments ===")
-        fetch_attachments_stage()
+    if args.card:
+        from card_pipeline import card_analyze_stage, card_decrypt_stage, card_fetch_stage
 
-    if run_all or args.decrypt:
-        print("=== Stage 2: Decrypting PDFs ===")
-        decrypt_pdfs_stage()
+        run_all_card = not (args.fetch or args.decrypt or args.analyze)
 
-    if run_all or args.analyze:
-        print("=== Stage 3: Analyzing with Gemini ===")
-        analyze_pdfs_stage(debug=args.debug)
+        if run_all_card or args.fetch:
+            print("=== Card Stage 1: Fetching attachments ===")
+            card_fetch_stage(since=args.since)
+
+        if run_all_card or args.decrypt:
+            print("=== Card Stage 2: Decrypting PDFs ===")
+            card_decrypt_stage()
+
+        if run_all_card or args.analyze:
+            print("=== Card Stage 3: Analyzing with Gemini ===")
+            card_analyze_stage(debug=args.debug)
+    else:
+        from stock_pipeline import (
+            stock_analyze_stage,
+            stock_decrypt_stage,
+            stock_fetch_stage,
+            stock_sync_stage,
+        )
+
+        run_all = not (args.fetch or args.decrypt or args.analyze or args.sync)
+
+        if run_all or args.fetch:
+            print("=== Stage 1: Fetching attachments ===")
+            stock_fetch_stage(since=args.since)
+
+        if run_all or args.decrypt:
+            print("=== Stage 2: Decrypting PDFs ===")
+            stock_decrypt_stage()
+
+        if run_all or args.analyze:
+            print("=== Stage 3: Analyzing with Gemini ===")
+            stock_analyze_stage(debug=args.debug)
+
+        if run_all or args.sync:
+            print("=== Stage 4: Syncing to Google Sheet ===")
+            stock_sync_stage()
