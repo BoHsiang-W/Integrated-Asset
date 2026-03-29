@@ -192,25 +192,6 @@ class SheetsClient:
         )
         return result.get("values", [])
 
-    def append_rows(
-        self, spreadsheet_id: str, range_: str, rows: list[list]
-    ) -> int:
-        """Append *rows* after the last row in *range_*. Returns appended count."""
-        body = {"values": rows}
-        result = (
-            self._service.spreadsheets()
-            .values()
-            .append(
-                spreadsheetId=spreadsheet_id,
-                range=range_,
-                valueInputOption="USER_ENTERED",
-                insertDataOption="INSERT_ROWS",
-                body=body,
-            )
-            .execute()
-        )
-        return result.get("updates", {}).get("updatedRows", 0)
-
     def get_sheet_id(self, spreadsheet_id: str, sheet_name: str) -> int | None:
         """Get the numeric sheet ID for a named sheet tab."""
         meta = (

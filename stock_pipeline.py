@@ -368,6 +368,27 @@ def _write_at(
     )
 
 
+def _ensure_space(
+    sheets: SheetsClient,
+    spreadsheet_id: str,
+    sheet_id: int,
+    write_at: int,
+    count: int,
+    boundary: int,
+) -> int:
+    """Insert blank rows before *boundary* if writing would overflow into the next section.
+
+    Returns the number of rows inserted (0 if no insertion needed).
+    """
+    write_end = write_at + count - 1
+    if write_end >= boundary:
+        needed = write_end - boundary + 1
+        # insert_rows_at uses 0-based index
+        sheets.insert_rows_at(spreadsheet_id, sheet_id, boundary - 1, needed)
+        return needed
+    return 0
+
+
 def stock_sync_stage() -> None:
     """Stage 4 — Sync local transactions.csv to Google Sheets (section-aware)."""
     raw_id = os.getenv("GOOGLE_SHEET_ID")
@@ -392,6 +413,12 @@ def stock_sync_stage() -> None:
     crypto_header = headers.get("Crypto")
     if not us_header or not crypto_header:
         print("Could not find US / Crypto section headers in the sheet. Aborting.")
+        return
+
+    # --- resolve numeric sheet ID (needed for row insertion) ---
+    sheet_id = sheets.get_sheet_id(spreadsheet_id, SHEET_NAME)
+    if sheet_id is None:
+        print(f"Could not find sheet tab '{SHEET_NAME}'. Aborting.")
         return
 
     # --- dedup against existing sheet data ---
@@ -435,6 +462,10 @@ def stock_sync_stage() -> None:
         rows = sorted(new_by_section["US"], key=lambda r: r[0])
         last = _last_data_row(sheets, spreadsheet_id, us_header + 1, crypto_header - 1)
         write_at = last + 1
+        inserted = _ensure_space(sheets, spreadsheet_id, sheet_id, write_at, len(rows), crypto_header)
+        if inserted:
+            crypto_header += inserted
+            print(f"  Inserted {inserted} blank row(s) before Crypto header to make space.")
         _write_at(sheets, spreadsheet_id, write_at, rows)
         print(f"  Wrote {len(rows)} US row(s) at row {write_at}")
 
@@ -443,6 +474,11 @@ def stock_sync_stage() -> None:
         rows = sorted(new_by_section["TW"], key=lambda r: r[0])
         last = _last_data_row(sheets, spreadsheet_id, 3, us_header - 1)
         write_at = last + 1
+        inserted = _ensure_space(sheets, spreadsheet_id, sheet_id, write_at, len(rows), us_header)
+        if inserted:
+            us_header += inserted
+            crypto_header += inserted
+            print(f"  Inserted {inserted} blank row(s) before US header to make space.")
         _write_at(sheets, spreadsheet_id, write_at, rows)
         print(f"  Wrote {len(rows)} TW row(s) at row {write_at}")
 
