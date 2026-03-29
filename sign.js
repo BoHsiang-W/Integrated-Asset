@@ -124,13 +124,19 @@ async function getBitgetTradeHistory(apiKey, secretKey, passphrase, symbol, { af
   const result = await bitgetRequest(apiKey, secretKey, passphrase, 'GET', requestPath, 'Bitget Trade History');
   if (!result) return null;
 
-  const trades = result.map(t => ({
-    symbol: t.symbol,
-    priceAvg: t.priceAvg,
-    quoteVolume: t.quoteVolume,
-    baseCoin: t.baseCoin,
-    uTime: new Date(Number(t.uTime)).toLocaleDateString('sv-SE').replace(/-/g, '/'),
-  }));
+  const trades = result.map(t => {
+    const baseCoin = t.baseCoin != null ? t.baseCoin : '';
+    if (t.baseCoin == null) {
+      console.warn('Bitget trade missing baseCoin field for symbol:', t.symbol);
+    }
+    return {
+      symbol: t.symbol,
+      priceAvg: t.priceAvg,
+      quoteVolume: t.quoteVolume,
+      baseCoin,
+      uTime: new Date(Number(t.uTime)).toLocaleDateString('sv-SE').replace(/-/g, '/'),
+    };
+  });
   console.log(`Bitget Trade History (${symbol}): ${trades.length} trade(s)`);
   return trades;
 }
