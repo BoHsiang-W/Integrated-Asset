@@ -124,12 +124,19 @@ async function getBitgetTradeHistory(apiKey, secretKey, passphrase, symbol, { af
   const result = await bitgetRequest(apiKey, secretKey, passphrase, 'GET', requestPath, 'Bitget Trade History');
   if (!result) return null;
 
-  const trades = result.map(t => ({
-    symbol: t.symbol,
-    priceAvg: t.priceAvg,
-    quoteVolume: t.quoteVolume,
-    uTime: new Date(Number(t.uTime)).toLocaleDateString('sv-SE').replace(/-/g, '/'),
-  }));
+  const trades = result.map(t => {
+    const baseCoin = t.baseCoin != null ? t.baseCoin : '';
+    if (t.baseCoin == null) {
+      console.warn('Bitget trade missing baseCoin field for symbol:', t.symbol);
+    }
+    return {
+      symbol: t.symbol,
+      priceAvg: t.priceAvg,
+      quoteVolume: t.quoteVolume,
+      baseCoin,
+      uTime: new Date(Number(t.uTime)).toLocaleDateString('sv-SE').replace(/-/g, '/'),
+    };
+  });
   console.log(`Bitget Trade History (${symbol}): ${trades.length} trade(s)`);
   return trades;
 }
@@ -171,8 +178,22 @@ async function getBinanceAccountBalance(apiKey, secretKey, asset, current = 1, s
 // CSV helpers
 // ---------------------------------------------------------------------------
 
-const CSV_PATH = path.join(__dirname, 'attachments', 'transactions.csv');
+const CSV_PATH = path.join(__dirname, 'attachments', 'stock', 'transactions.csv');
 const CSV_HEADER = '交易日期,買/賣/股利,代號,股票,交易類別,買入股數,買入價格,賣出股數,賣出價格,手續費,收入';
+
+/**
+ * Parse a CSV row into a key (date, action, code) for dedup.
+ * Handles both padded (Python pipeline) and non-padded (sign.js) formats.
+ */
+function rowKey(line) {
+  const cols = line.split(',').map(c => c.trim());
+  // Normalize date: strip leading zeros (2026/01/05 → 2026/1/5)
+  const parts = cols[0].split('/');
+  const date = parts.length === 3
+    ? `${parseInt(parts[0])}/${parseInt(parts[1])}/${parseInt(parts[2])}`
+    : cols[0];
+  return `${date}|${cols[1]}|${cols[2]}`;
+}
 
 function readCsvRows() {
   if (!fs.existsSync(CSV_PATH)) return [];
@@ -182,7 +203,13 @@ function readCsvRows() {
 
 function writeCsv(rows) {
   rows.sort();
-  const deduped = [...new Set(rows)];
+  const seen = new Set();
+  const deduped = rows.filter(row => {
+    const key = rowKey(row);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   fs.writeFileSync(CSV_PATH, '\uFEFF' + CSV_HEADER + '\n' + deduped.join('\n') + '\n', 'utf-8');
   console.log(`Saved ${CSV_PATH} (${deduped.length} rows)`);
 }
@@ -191,7 +218,7 @@ function tradesToCsvRows(trades) {
   return trades.map(t => {
     const qty = (parseFloat(t.quoteVolume) / parseFloat(t.priceAvg)).toFixed(6);
     const price = parseFloat(t.priceAvg).toFixed(6);
-    return `${t.uTime},買,${t.symbol},${t.symbol},Crypto,${qty},${price},,,,`;
+    return `${t.uTime},買,${t.baseCoin},${t.symbol},Crypto,${qty},${price},,,,`;
   });
 }
 
@@ -219,6 +246,13 @@ const BITGET_SYMBOLS = ['BTCUSDT', 'ETHUSDT'];
   const allTrades = tradeResults.filter(Boolean).flat();
   if (allTrades.length) {
     const existing = readCsvRows();
-    writeCsv([...existing, ...tradesToCsvRows(allTrades)]);
+    const existingKeys = new Set(existing.map(rowKey));
+    const newRows = tradesToCsvRows(allTrades).filter(r => !existingKeys.has(rowKey(r)));
+    console.log(`Trades fetched: ${allTrades.length}, new: ${newRows.length}, skipped: ${allTrades.length - newRows.length}`);
+    if (newRows.length) {
+      writeCsv([...existing, ...newRows]);
+    } else {
+      console.log('No new trades to add.');
+    }
   }
 })();
