@@ -155,9 +155,15 @@ def _extract_attachment_parts(
                 .get(userId="me", messageId=message["id"], id=attachment_id)
                 .execute()
             )
+            subject = ""
+            for header in message.get("payload", {}).get("headers", []):
+                if header["name"].lower() == "subject":
+                    subject = header["value"]
+                    break
             output.append(
                 {
                     "filename": part["filename"],
+                    "subject": subject,
                     "data": raw.get("data"),
                     "mimeType": part.get("mimeType"),
                     "date": datetime.fromtimestamp(
@@ -238,6 +244,21 @@ class SheetsClient:
             range=range_,
             valueInputOption="USER_ENTERED",
             body=body,
+        ).execute()
+
+    def batch_update_ranges(
+        self, spreadsheet_id: str, data: list[dict]
+    ) -> None:
+        """Write multiple ranges in a single API call.
+
+        *data* is a list of ``{"range": "Sheet!A1:C3", "values": [[...], ...]}``.
+        """
+        body = {
+            "valueInputOption": "USER_ENTERED",
+            "data": data,
+        }
+        self._service.spreadsheets().values().batchUpdate(
+            spreadsheetId=spreadsheet_id, body=body
         ).execute()
 
 
@@ -398,23 +419,48 @@ def fetch_attachments_stage(
     raw_dir: Path,
     since: str | None = None,
 ) -> None:
-    """Download matching PDF attachments from Gmail using *config* patterns."""
+    """Download matching PDF attachments from Gmail.
+
+    Fetches all emails with attachments since *since*, then keeps any
+    attachment whose **filename** or **subject** matches a broker pattern.
+    """
     if not since:
         since = (datetime.now() - timedelta(days=7)).strftime("%Y/%m/%d")
-    query = f"has:attachment after:{since}"
-    patterns = [os.getenv(cfg["pattern_env"]) for cfg in config.values()]
-    attachments = GmailClient().fetch_attachments(query=query)
 
-    matching = [
-        att
-        for att in attachments
-        if any(p and re.search(p, att["filename"]) for p in patterns)
-    ]
+    patterns: list[str] = []
+    for cfg in config.values():
+        pattern = os.getenv(cfg["pattern_env"])
+        if pattern:
+            patterns.append(pattern)
+
+    if not patterns:
+        print("No broker patterns configured. Check .env file.")
+        return
+
+    gmail = GmailClient()
+    attachments = gmail.fetch_attachments(query=f"has:attachment after:{since}")
+
+    matching: list[dict] = []
+    for att in attachments:
+        fname = att.get("filename", "")
+        if not fname.lower().endswith(".pdf"):
+            continue
+        subject = att.get("subject", "")
+        matched_by_fname = any(re.search(p, fname) for p in patterns)
+        matched_by_subject = not matched_by_fname and any(re.search(p, subject) for p in patterns)
+        if matched_by_fname or matched_by_subject:
+            if matched_by_subject:
+                safe_subject = re.sub(r'[\\/*?:"<>|]', '_', subject).strip()
+                att["filename"] = f"{safe_subject}.pdf"
+            matching.append(att)
+
     if matching:
         save_attachments(matching, raw_dir)
         print(f"Saved {len(matching)} attachments to {raw_dir}")
     else:
         print("No matching statements found.")
+
+
 
 
 # ---------------------------------------------------------------------------

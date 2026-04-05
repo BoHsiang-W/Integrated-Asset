@@ -41,8 +41,16 @@ CSV_FIELDNAMES = [
     "買入價格",
     "賣出股數",
     "賣出價格",
+    "現價",
     "手續費",
+    "折讓後手續費",
+    "交易稅",
+    "成交價金",
+    "交易成本",
+    "支出",
     "收入",
+    "決策原因",
+    "手續費折數",
 ]
 
 # pattern_env: env var holding the filename regex to match broker PDFs
@@ -79,15 +87,19 @@ BROKER_CONFIG: dict[str, dict[str, str]] = {
 def _build_pattern_map(value_key: str) -> dict[str, object]:
     """Build a {filename_regex: value} mapping from BROKER_CONFIG."""
     result: dict[str, object] = {}
-    for cfg in BROKER_CONFIG.values():
+    for name, cfg in BROKER_CONFIG.items():
         pattern = os.getenv(cfg["pattern_env"])
         if not pattern:
             continue
-        result[pattern] = (
-            os.getenv(cfg[value_key])
-            if value_key == "password_env"
-            else PROMPT_DIR / cfg[value_key]
-        )
+        if value_key == "password_env":
+            value = os.getenv(cfg[value_key])
+            if not value:
+                raise ValueError(
+                    f"Broker {name}: pattern matched but {cfg[value_key]} is not set"
+                )
+        else:
+            value = PROMPT_DIR / cfg[value_key]
+        result[pattern] = value
     return result
 
 
@@ -240,15 +252,23 @@ _SHEET_COL_MAP = {
     "買入價格": "G",
     "賣出股數": "H",
     "賣出價格": "I",
-    # J = 現價 (auto / leave blank)
+    "現價": "J",
     "手續費": "K",
-    # L~P = auto-calculated in sheet
+    "折讓後手續費": "L",
+    "交易稅": "M",
+    "成交價金": "N",
+    "交易成本": "O",
+    "支出": "P",
     "收入": "Q",
+    "決策原因": "R",
+    "手續費折數": "S",
 }
 
 _COL_INDEX = {
     "A": 0, "B": 1, "C": 2, "D": 3, "E": 4,
-    "F": 5, "G": 6, "H": 7, "I": 8, "K": 10, "Q": 16,
+    "F": 5, "G": 6, "H": 7, "I": 8, "J": 9, "K": 10,
+    "L": 11, "M": 12, "N": 13, "O": 14, "P": 15, "Q": 16,
+    "R": 17, "S": 18,
 }
 
 SHEET_NAME = "交易紀錄"
@@ -298,16 +318,17 @@ def _read_sheet_keys(sheets: SheetsClient, spreadsheet_id: str) -> set[tuple]:
 def _categorize_csv_row(row: dict) -> str:
     """Return ``'TW'``, ``'US'``, or ``'Crypto'`` based on CSV category."""
     cat = row.get("交易類別", "").strip()
+    symbol = row.get("代號", "").strip()
     if cat == "Crypto":
         return "Crypto"
-    if cat == "美股":
+    if (cat == "ETF" or cat == "一般") and symbol and not symbol.isdigit():
         return "US"
     return "TW"
 
 
 def _csv_row_to_sheet_row(row: dict) -> list[str]:
-    """Convert a CSV dict row to a list of 17 values (columns A–Q)."""
-    out = [""] * 17
+    """Convert a CSV dict row to a list of 19 values (columns A–S)."""
+    out = [""] * 19
     for field, col_letter in _SHEET_COL_MAP.items():
         val = row.get(field, "").strip()
         out[_COL_INDEX[col_letter]] = val
@@ -355,17 +376,30 @@ def _last_data_row(
     return last
 
 
+# Contiguous column groups to write, skipping formula/manual columns (D, J, N, O, P, R).
+# Each tuple: (start_col_letter, end_col_letter, start_index, end_index_exclusive)
+_WRITE_GROUPS = [
+    ("A", "C", 0, 3),    # A:C  交易日期, 買/賣/股利, 代號
+    ("E", "I", 4, 9),    # E:I  交易類別, 買入股數, 買入價格, 賣出股數, 賣出價格
+    ("L", "L", 11, 12),  # L    折讓後手續費
+    ("Q", "Q", 16, 17),  # Q    收入
+]
+
+
 def _write_at(
     sheets: SheetsClient,
     spreadsheet_id: str,
     start_row: int,
     rows: list[list[str]],
 ) -> None:
-    """Write *rows* starting at *start_row* (1-based), overwriting empty cells."""
+    """Write *rows* starting at *start_row*, skipping formula/manual columns."""
     end_row = start_row + len(rows) - 1
-    sheets.update_range(
-        spreadsheet_id, f"{SHEET_NAME}!A{start_row}:Q{end_row}", rows
-    )
+    data = []
+    for start_col, end_col, idx_start, idx_end in _WRITE_GROUPS:
+        range_ = f"{SHEET_NAME}!{start_col}{start_row}:{end_col}{end_row}"
+        values = [row[idx_start:idx_end] for row in rows]
+        data.append({"range": range_, "values": values})
+    sheets.batch_update_ranges(spreadsheet_id, data)
 
 
 def _ensure_space(
