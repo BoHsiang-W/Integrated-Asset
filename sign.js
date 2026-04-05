@@ -179,7 +179,7 @@ async function getBinanceAccountBalance(apiKey, secretKey, asset, current = 1, s
 // ---------------------------------------------------------------------------
 
 const CSV_PATH = path.join(__dirname, 'attachments', 'stock', 'transactions.csv');
-const CSV_HEADER = '交易日期,買/賣/股利,代號,股票,交易類別,買入股數,買入價格,賣出股數,賣出價格,手續費,收入';
+const CSV_HEADER = '交易日期,買/賣/股利,代號,股票,交易類別,買入股數,買入價格,賣出股數,賣出價格,現價,手續費,折讓後手續費,交易稅,成交價金,交易成本,支出,收入,決策原因,手續費折數';
 
 /**
  * Parse a CSV row into a key (date, action, code) for dedup.
@@ -218,7 +218,7 @@ function tradesToCsvRows(trades) {
   return trades.map(t => {
     const qty = (parseFloat(t.quoteVolume) / parseFloat(t.priceAvg)).toFixed(6);
     const price = parseFloat(t.priceAvg).toFixed(6);
-    return `${t.uTime},買,${t.baseCoin},${t.symbol},Crypto,${qty},${price},,,,`;
+    return `${t.uTime},買,${t.baseCoin},${t.symbol},Crypto,${qty},${price},,,,,,,,,,,,`;
   });
 }
 
