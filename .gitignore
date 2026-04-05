@@ -4,3 +4,5 @@
 prompt/
 node_modules/
 attachments/*
+__pycache__/
+logs/
