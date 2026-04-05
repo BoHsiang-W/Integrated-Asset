@@ -218,7 +218,11 @@ function tradesToCsvRows(trades) {
   return trades.map(t => {
     const qty = (parseFloat(t.quoteVolume) / parseFloat(t.priceAvg)).toFixed(6);
     const price = parseFloat(t.priceAvg).toFixed(6);
-    return `${t.uTime},買,${t.baseCoin},${t.symbol},Crypto,${qty},${price},,,,,,,,,,,,`;
+    const row = [
+      t.uTime, "買", t.baseCoin, t.symbol, "Crypto", qty, price,
+      "", "", "", "", "0", "", "", "", "", "0", "", ""
+    ];
+    return row.join(",");
   });
 }
 

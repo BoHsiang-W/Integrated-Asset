@@ -82,31 +82,29 @@ CATHAY_CARD_PASSWORD=your_password
 ### Stock Pipeline
 
 ```bash
-# Run all stages (fetch → decrypt → analyze), default last 7 days
-python google_file_sync.py
+# Run all stages (fetch → decrypt → analyze → sync), default last 7 days
+python main.py
 
 # Fetch since a specific date
-python google_file_sync.py --since 2026/01/01
+python main.py --since 2026/01/01
 
 # Run individual stages
-python google_file_sync.py --fetch
-python google_file_sync.py --decrypt
-python google_file_sync.py --analyze
-
-# Sync transactions.csv to Google Sheets
-python google_file_sync.py --sync
+python main.py --fetch
+python main.py --decrypt
+python main.py --analyze
+python main.py --sync
 ```
 
 ### Credit Card Pipeline
 
 ```bash
 # Run all card stages
-python google_file_sync.py --card
+python main.py --card
 
 # Run individual card stages
-python google_file_sync.py --card --fetch
-python google_file_sync.py --card --decrypt
-python google_file_sync.py --card --analyze
+python main.py --card --fetch
+python main.py --card --decrypt
+python main.py --card --analyze
 ```
 
 ### Crypto Pipeline
@@ -115,26 +113,56 @@ python google_file_sync.py --card --analyze
 node sign.js
 ```
 
+### Scheduled Execution
+
+```bash
+# Windows Task Scheduler (logs to logs/YYYY-MM-DD.log)
+run_pipeline.bat
+```
+
 ---
 
 ## Project Structure
 
 ```
-google_file_sync.py          # Shared infrastructure & CLI entry point
-stock_pipeline.py            # Stock/ETF/dividend pipeline (Stages 1-4)
-card_pipeline.py             # Credit-card pipeline
-sign.js                      # Crypto exchange balance & trade fetcher
-credentials.json             # Google OAuth2 credentials
-token.json                   # OAuth2 token (auto-generated)
-prompt/                      # Gemini prompt templates
-attachments/
-  stock/
-    raw/                     # Downloaded broker PDFs
-    decrypted/               # Decrypted broker PDFs
-    transactions.csv         # Merged stock + crypto transactions
-  card/
-    raw/                     # Downloaded card PDFs
-    decrypted/               # Decrypted card PDFs
-    credit_card_all.csv      # All credit card transactions
-    monthly_summary.csv      # Monthly spending summary
+├── main.py                         # CLI entry point
+├── config.py                       # Centralized constants & configs
+├── sign.js                         # Crypto exchange balance & trade fetcher
+├── run_pipeline.bat                # Task Scheduler entry with logging
+│
+├── clients/
+│   ├── gmail.py                    # Gmail API client with OAuth2
+│   ├── gemini.py                   # Gemini AI client with retry
+│   └── sheets.py                   # Google Sheets sync writer
+│
+├── models/
+│   └── transaction.py              # Transaction & CardTransaction dataclasses
+│
+├── pipelines/
+│   ├── base.py                     # BasePipeline ABC (fetch → decrypt template)
+│   ├── stock.py                    # Stock / ETF / dividend pipeline
+│   └── card.py                     # Credit-card pipeline
+│
+├── brokers/
+│   ├── base.py                     # BaseBroker ABC
+│   ├── ibkr.py                     # IBKR Client Portal API (skeleton)
+│   └── registry.py                 # Broker discovery registry
+│
+├── utils/
+│   ├── csv_helpers.py              # CSV parse, read, write, dedup, normalize
+│   ├── pdf_helpers.py              # PDF decrypt & save attachments
+│   └── patterns.py                 # Filename pattern matching & tracking
+│
+├── prompt/                         # Gemini prompt templates
+│
+└── attachments/
+    ├── stock/
+    │   ├── raw/                    # Downloaded broker PDFs
+    │   ├── decrypted/              # Decrypted broker PDFs
+    │   └── transactions.csv        # Merged stock + crypto transactions
+    └── card/
+        ├── raw/                    # Downloaded card PDFs
+        ├── decrypted/              # Decrypted card PDFs
+        ├── credit_card_all.csv     # All credit card transactions
+        └── monthly_summary.csv     # Monthly spending summary
 ```
