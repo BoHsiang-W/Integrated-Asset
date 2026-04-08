@@ -6,6 +6,7 @@ Usage:
   python main.py --fetch            # stock fetch only
   python main.py --since 2026/01/01 # custom date range
   python main.py --sync             # stock sync to Google Sheets only
+  python main.py --ibkr             # fetch from IBKR Client Portal API
 """
 
 from __future__ import annotations
@@ -59,6 +60,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print raw Gemini responses and parsed rows",
     )
+    parser.add_argument(
+        "--ibkr",
+        action="store_true",
+        help="Stage 5: Fetch transactions from IBKR Client Portal API",
+    )
     return parser.parse_args()
 
 
@@ -88,7 +94,7 @@ def main() -> None:
         from pipelines.stock import StockPipeline
 
         pipeline = StockPipeline()
-        run_all = not (args.fetch or args.decrypt or args.analyze or args.sync)
+        run_all = not (args.fetch or args.decrypt or args.analyze or args.sync or args.ibkr)
 
         if run_all:
             pipeline.run_all(since=args.since, debug=args.debug)
@@ -105,6 +111,9 @@ def main() -> None:
             if args.sync:
                 print("=== Stage 4: Syncing to Google Sheet ===")
                 pipeline.sync()
+            if args.ibkr:
+                print("=== Stage 5: Fetching from IBKR ===")
+                pipeline.fetch_ibkr(since=args.since)
 
 
 if __name__ == "__main__":
