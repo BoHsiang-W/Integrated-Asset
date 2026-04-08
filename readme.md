@@ -145,8 +145,7 @@ run_pipeline.bat
 │
 ├── brokers/
 │   ├── base.py                     # BaseBroker ABC
-│   ├── ibkr.py                     # IBKR Client Portal API (skeleton)
-│   └── registry.py                 # Broker discovery registry
+│   └── ibkr.py                     # IBKR Client Portal API adapter
 │
 ├── utils/
 │   ├── csv_helpers.py              # CSV parse, read, write, dedup, normalize

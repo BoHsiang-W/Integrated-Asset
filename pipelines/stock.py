@@ -223,3 +223,42 @@ class StockPipeline(BasePipeline):
         super().run_all(since=since, debug=debug)
         print("=== Stage 4: Syncing to Google Sheet ===")
         self.sync()
+
+    # ------------------------------------------------------------------
+    # Stage 5 — IBKR API fetch
+    # ------------------------------------------------------------------
+
+    def fetch_ibkr(self, since: str | None = None) -> None:
+        """Fetch transactions from IBKR Client Portal API and merge into transactions.csv."""
+        from datetime import date, datetime, timedelta
+        from brokers.ibkr import IBKRBroker
+
+        if since:
+            since_date = datetime.strptime(since, "%Y/%m/%d").date()
+        else:
+            since_date = date.today() - timedelta(days=7)
+
+        print(f"Fetching IBKR transactions since {since_date} ...")
+        broker = IBKRBroker()
+        new_rows = broker.fetch_transactions(since=since_date)
+
+        if not new_rows:
+            print("No IBKR transactions returned.")
+            return
+
+        print(f"  {len(new_rows)} transaction(s) received.")
+        all_rows = read_existing_csv(self.csv_output) + new_rows
+        all_rows = [r for r in all_rows if any(str(v).strip() for v in r.values())]
+        all_rows = normalize_rows(all_rows, overflow_field="收入")
+        unique_rows = dedup_and_sort(
+            all_rows,
+            self.csv_fieldnames,
+            sort_key=lambda r: (
+                r.get("交易日期", ""),
+                r.get("代號", ""),
+                r.get("買/賣/股利", ""),
+            ),
+        )
+        write_csv(self.csv_output, unique_rows, self.csv_fieldnames)
+        dupes = len(all_rows) - len(unique_rows)
+        print(f"Saved {self.csv_output} ({len(unique_rows)} rows, {dupes} dupes removed)")
