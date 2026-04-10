@@ -1,10 +1,10 @@
-﻿"""CLI entry point for the integrated-asset pipeline.
+"""CLI entry point for the integrated-asset pipeline.
 
 Usage:
   python main.py                    # run all stock stages
   python main.py --card             # run all card stages
   python main.py --fetch            # stock fetch only
-  python main.py --since 2026/01/01 # custom date range
+  python main.py --since 10         # custom date range (days ago)
   python main.py --sync             # stock sync to Google Sheets only
   python main.py --ibkr             # fetch from IBKR Client Portal API
 """
@@ -22,7 +22,7 @@ def _parse_args() -> argparse.Namespace:
         epilog=(
             "Examples:\n"
             "  python main.py                          # run all stock stages\n"
-            "  python main.py --since 2026/01/01       # fetch since a specific date\n"
+            "  python main.py --since 10               # fetch since 10 days ago\n"
             "  python main.py --analyze                # only Gemini analysis\n"
             "  python main.py --card                   # credit card pipeline\n"
             "  python main.py --card --analyze         # card analyze only\n"
@@ -46,9 +46,9 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--since",
-        type=str,
-        metavar="YYYY/MM/DD",
-        help="Only fetch emails after this date (default: 7 days ago)",
+        type=int,
+        metavar="DAYS",
+        help="Only fetch emails/transactions from this many days ago (default: 7 for email, 30 for IBKR)",
     )
     parser.add_argument(
         "--sync",
@@ -94,7 +94,9 @@ def main() -> None:
         from pipelines.stock import StockPipeline
 
         pipeline = StockPipeline()
-        run_all = not (args.fetch or args.decrypt or args.analyze or args.sync or args.ibkr)
+        run_all = not (
+            args.fetch or args.decrypt or args.analyze or args.sync or args.ibkr
+        )
 
         if run_all:
             pipeline.run_all(since=args.since, debug=args.debug)

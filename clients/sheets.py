@@ -1,4 +1,4 @@
-﻿"""Google Sheets API client + section-aware sync writer."""
+"""Google Sheets API client + section-aware sync writer."""
 
 from __future__ import annotations
 
@@ -21,9 +21,7 @@ class SheetsClient:
     def __init__(self) -> None:
         self._service = build("sheets", "v4", credentials=get_credentials())
 
-    def read_rows(
-        self, spreadsheet_id: str, range_: str
-    ) -> list[list[str]]:
+    def read_rows(self, spreadsheet_id: str, range_: str) -> list[list[str]]:
         """Read values from a sheet range. Returns a list of rows."""
         result = (
             self._service.spreadsheets()
@@ -69,9 +67,7 @@ class SheetsClient:
             spreadsheetId=spreadsheet_id, body=body
         ).execute()
 
-    def update_range(
-        self, spreadsheet_id: str, range_: str, rows: list[list]
-    ) -> None:
+    def update_range(self, spreadsheet_id: str, range_: str, rows: list[list]) -> None:
         """Write *rows* to a specific range (overwrite existing values)."""
         body = {"values": rows}
         self._service.spreadsheets().values().update(
@@ -81,9 +77,7 @@ class SheetsClient:
             body=body,
         ).execute()
 
-    def batch_update_ranges(
-        self, spreadsheet_id: str, data: list[dict]
-    ) -> None:
+    def batch_update_ranges(self, spreadsheet_id: str, data: list[dict]) -> None:
         """Write multiple ranges in a single API call."""
         body = {
             "valueInputOption": "USER_ENTERED",
@@ -125,16 +119,31 @@ SHEET_COL_MAP = {
 }
 
 COL_INDEX = {
-    "A": 0, "B": 1, "C": 2, "D": 3, "E": 4,
-    "F": 5, "G": 6, "H": 7, "I": 8, "J": 9, "K": 10,
-    "L": 11, "M": 12, "N": 13, "O": 14, "P": 15, "Q": 16,
-    "R": 17, "S": 18,
+    "A": 0,
+    "B": 1,
+    "C": 2,
+    "D": 3,
+    "E": 4,
+    "F": 5,
+    "G": 6,
+    "H": 7,
+    "I": 8,
+    "J": 9,
+    "K": 10,
+    "L": 11,
+    "M": 12,
+    "N": 13,
+    "O": 14,
+    "P": 15,
+    "Q": 16,
+    "R": 17,
+    "S": 18,
 }
 
 # Contiguous column groups to write, skipping formula/manual columns.
 _WRITE_GROUPS = [
-    ("A", "C", 0, 3),    # A:C  交易日期, 買/賣/股利, 代號
-    ("E", "I", 4, 9),    # E:I  交易類別 … 賣出價格
+    ("A", "C", 0, 3),  # A:C  交易日期, 買/賣/股利, 代號
+    ("E", "I", 4, 9),  # E:I  交易類別 … 賣出價格
     ("L", "L", 11, 12),  # L    折讓後手續費
     ("Q", "Q", 16, 17),  # Q    收入
 ]
@@ -173,9 +182,7 @@ class SheetsSyncWriter:
 
     def last_data_row(self, start: int, end: int) -> int:
         """Return the last row (1-based) in [start, end] with data in A–C."""
-        rows = self._sheets.read_rows(
-            self._sid, f"{SHEET_NAME}!A{start}:C{end}"
-        )
+        rows = self._sheets.read_rows(self._sid, f"{SHEET_NAME}!A{start}:C{end}")
         last = start - 1
         for i, row in enumerate(rows, start):
             if (

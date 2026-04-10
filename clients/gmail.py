@@ -1,4 +1,4 @@
-﻿"""Gmail API client — fetches email attachments via OAuth2."""
+"""Gmail API client — fetches email attachments via OAuth2."""
 
 from __future__ import annotations
 
@@ -31,9 +31,7 @@ def get_credentials() -> Credentials:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                CREDENTIALS_FILE, SCOPES
-            )
+            flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
             creds = flow.run_local_server(port=0)
         with open(TOKEN_FILE, "w", encoding="utf-8") as fh:
             fh.write(creds.to_json())
