@@ -1,8 +1,9 @@
-﻿"""StockPipeline — Stock / ETF / dividend pipeline with Google Sheets sync."""
+"""StockPipeline — Stock / ETF / dividend pipeline with Google Sheets sync."""
 
 from __future__ import annotations
 
 import os
+from datetime import date, timedelta
 from pathlib import Path
 
 from clients.gemini import GeminiClient
@@ -25,6 +26,8 @@ from utils.csv_helpers import (
     write_csv,
 )
 from utils.patterns import load_processed, match_pattern, save_processed
+
+from brokers.ibkr import IBKRBroker
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -54,11 +57,15 @@ class StockPipeline(BasePipeline):
         gemini = GeminiClient()
         processed = load_processed(self.processed_file)
 
-        decrypted = sorted(
-            f
-            for f in self.decrypted_dir.iterdir()
-            if f.name.startswith("decrypted_") and f.is_file()
-        ) if self.decrypted_dir.exists() else []
+        decrypted = (
+            sorted(
+                f
+                for f in self.decrypted_dir.iterdir()
+                if f.name.startswith("decrypted_") and f.is_file()
+            )
+            if self.decrypted_dir.exists()
+            else []
+        )
         new_files = [f for f in decrypted if f.name not in processed]
 
         if not new_files:
@@ -84,7 +91,9 @@ class StockPipeline(BasePipeline):
                 continue
 
             if debug:
-                print(f"  --- RAW GEMINI RESPONSE ---\n{raw}\n  --- END RAW RESPONSE ---")
+                print(
+                    f"  --- RAW GEMINI RESPONSE ---\n{raw}\n  --- END RAW RESPONSE ---"
+                )
 
             rows = parse_csv_response(raw)
 
@@ -94,13 +103,14 @@ class StockPipeline(BasePipeline):
 
             if rows:
                 new_rows.extend(rows)
-                processed.add(file.name)
                 print(f"  Done. ({len(rows)} rows)")
             else:
                 print("  No data rows parsed.")
+            processed.add(file.name)
 
         if not new_rows:
             print("No new results to save.")
+            save_processed(processed, self.processed_file)
             return
 
         all_rows = read_existing_csv(self.csv_output) + new_rows
@@ -118,7 +128,9 @@ class StockPipeline(BasePipeline):
 
         write_csv(self.csv_output, unique_rows, self.csv_fieldnames)
         dupes = len(all_rows) - len(unique_rows)
-        print(f"\nSaved {self.csv_output} ({len(unique_rows)} rows, {dupes} duplicates removed)")
+        print(
+            f"\nSaved {self.csv_output} ({len(unique_rows)} rows, {dupes} duplicates removed)"
+        )
         save_processed(processed, self.processed_file)
 
     # ------------------------------------------------------------------
@@ -152,6 +164,7 @@ class StockPipeline(BasePipeline):
             return
 
         from clients.sheets import SHEET_NAME
+
         sheet_id = sheets.get_sheet_id(spreadsheet_id, SHEET_NAME)
         if sheet_id is None:
             print(f"Could not find sheet tab '{SHEET_NAME}'. Aborting.")
@@ -196,7 +209,9 @@ class StockPipeline(BasePipeline):
             inserted = writer.ensure_space(sheet_id, write_at, len(rows), crypto_header)
             if inserted:
                 crypto_header += inserted
-                print(f"  Inserted {inserted} blank row(s) before Crypto header to make space.")
+                print(
+                    f"  Inserted {inserted} blank row(s) before Crypto header to make space."
+                )
             writer.write_rows(write_at, rows)
             print(f"  Wrote {len(rows)} US row(s) at row {write_at}")
 
@@ -209,7 +224,9 @@ class StockPipeline(BasePipeline):
             if inserted:
                 us_header += inserted
                 crypto_header += inserted
-                print(f"  Inserted {inserted} blank row(s) before US header to make space.")
+                print(
+                    f"  Inserted {inserted} blank row(s) before US header to make space."
+                )
             writer.write_rows(write_at, rows)
             print(f"  Wrote {len(rows)} TW row(s) at row {write_at}")
 
@@ -228,15 +245,11 @@ class StockPipeline(BasePipeline):
     # Stage 5 — IBKR API fetch
     # ------------------------------------------------------------------
 
-    def fetch_ibkr(self, since: str | None = None) -> None:
+    def fetch_ibkr(self, since: int | None = None) -> None:
         """Fetch transactions from IBKR Client Portal API and merge into transactions.csv."""
-        from datetime import date, datetime, timedelta
-        from brokers.ibkr import IBKRBroker
 
-        if since:
-            since_date = datetime.strptime(since, "%Y/%m/%d").date()
-        else:
-            since_date = date.today() - timedelta(days=7)
+        days_back = since if since is not None else 7
+        since_date = date.today() - timedelta(days=days_back)
 
         print(f"Fetching IBKR transactions since {since_date} ...")
         broker = IBKRBroker()
@@ -261,4 +274,6 @@ class StockPipeline(BasePipeline):
         )
         write_csv(self.csv_output, unique_rows, self.csv_fieldnames)
         dupes = len(all_rows) - len(unique_rows)
-        print(f"Saved {self.csv_output} ({len(unique_rows)} rows, {dupes} dupes removed)")
+        print(
+            f"Saved {self.csv_output} ({len(unique_rows)} rows, {dupes} dupes removed)"
+        )

@@ -1,4 +1,4 @@
-﻿"""IBKRBroker — Interactive Brokers adapter (Client Portal API).
+"""IBKRBroker — Interactive Brokers adapter (Client Portal API).
 
 Fetches historical transactions via the Client Portal Gateway REST API.
 Gateway must be running locally before use (default: https://localhost:5000).
@@ -26,6 +26,7 @@ from datetime import date
 from typing import Generator, Literal
 
 import requests
+from tqdm import tqdm
 
 from brokers.base import BaseBroker
 
@@ -89,7 +90,7 @@ def _conid_symbol_map(instruments: list[dict]) -> dict[int, str]:
 def _parse_trade_date(raw_date: str) -> str:
     """Convert IBKR rawDate string ``YYYYMMDD`` → ``YYYY/M/D``."""
     if len(raw_date) == 8:
-        return f"{raw_date[:4]}/{int(raw_date[4:6])}/{int(raw_date[6:])}"
+        return f"{raw_date[:4]}/{raw_date[4:6]}/{raw_date[6:]}"
     return raw_date
 
 
@@ -118,7 +119,7 @@ def _map_transaction(tx: dict, conid_map: dict[int, str]) -> dict:
         "交易日期": trade_date,
         "買/賣/股利": action,
         "代號": symbol,
-        "股票": tx.get("desc", symbol),
+        "股票": symbol,
         "交易類別": "ETF" if symbol in _ETF_SYMBOLS else "一般",
         "買入股數": qty if action == "買" else "",
         "買入價格": price if action == "買" else "",
@@ -209,9 +210,7 @@ class IBKRBroker(BaseBroker):
         """
         self._authenticate()
 
-        instruments = _fetch_watchlist_instruments(
-            self.base_url, self._session
-        )
+        instruments = _fetch_watchlist_instruments(self.base_url, self._session)
         conids = [
             item["conid"]
             for item in instruments
@@ -221,7 +220,7 @@ class IBKRBroker(BaseBroker):
         days = (date.today() - since).days
 
         raw: list[dict] = []
-        for conid in conids:
+        for conid in tqdm(conids):
             symbol = conid_map.get(conid, str(conid))
             raw.extend(self._fetch_conid_transactions(conid, days, symbol))
 

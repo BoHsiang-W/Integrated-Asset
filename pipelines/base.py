@@ -1,4 +1,4 @@
-﻿"""BasePipeline — Template Method base class for all pipelines."""
+"""BasePipeline — Template Method base class for all pipelines."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ class BasePipeline(ABC):
             )
             if matched_by_fname or matched_by_subject:
                 if matched_by_subject:
-                    safe_subject = re.sub(r'[\\/*?:"<>|]', '_', subject).strip()
+                    safe_subject = re.sub(r'[\\/*?:"<>|]', "_", subject).strip()
                     att["filename"] = f"{safe_subject}.pdf"
                 matching.append(att)
 

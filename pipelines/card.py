@@ -1,4 +1,4 @@
-﻿"""CardPipeline — Credit-card statement pipeline."""
+"""CardPipeline — Credit-card statement pipeline."""
 
 from __future__ import annotations
 
@@ -54,11 +54,15 @@ class CardPipeline(BasePipeline):
         gemini = GeminiClient()
         processed = load_processed(self.processed_file)
 
-        decrypted = sorted(
-            f
-            for f in self.decrypted_dir.iterdir()
-            if f.name.startswith("decrypted_") and f.is_file()
-        ) if self.decrypted_dir.exists() else []
+        decrypted = (
+            sorted(
+                f
+                for f in self.decrypted_dir.iterdir()
+                if f.name.startswith("decrypted_") and f.is_file()
+            )
+            if self.decrypted_dir.exists()
+            else []
+        )
         new_files = [
             f
             for f in decrypted
@@ -86,7 +90,9 @@ class CardPipeline(BasePipeline):
                 continue
 
             if debug:
-                print(f"  --- RAW GEMINI RESPONSE ---\n{raw}\n  --- END RAW RESPONSE ---")
+                print(
+                    f"  --- RAW GEMINI RESPONSE ---\n{raw}\n  --- END RAW RESPONSE ---"
+                )
 
             amount_due = _parse_amount_due(raw)
             if amount_due:
@@ -105,13 +111,14 @@ class CardPipeline(BasePipeline):
 
             if rows:
                 new_rows.extend(rows)
-                processed.add(file.name)
                 print(f"  Done. ({len(rows)} rows)")
             else:
                 print("  No data rows parsed.")
+            processed.add(file.name)
 
         if not new_rows:
             print("No new card results to save.")
+            save_processed(processed, self.processed_file)
             return
 
         # --- credit_card_all.csv ---
@@ -130,7 +137,9 @@ class CardPipeline(BasePipeline):
 
         write_csv(self.csv_output, unique_rows, self.csv_fieldnames)
         dupes = len(all_rows) - len(unique_rows)
-        print(f"\nSaved {self.csv_output} ({len(unique_rows)} rows, {dupes} dupes removed)")
+        print(
+            f"\nSaved {self.csv_output} ({len(unique_rows)} rows, {dupes} dupes removed)"
+        )
 
         # --- monthly_summary.csv ---
         if bank_amounts:
@@ -160,6 +169,7 @@ class CardPipeline(BasePipeline):
     def _build_bank_map(self) -> dict[str, str]:
         """Build a {filename_regex: bank_name} mapping from CARD_CONFIG."""
         import os
+
         result: dict[str, str] = {}
         for cfg in self.config.values():
             pattern = os.getenv(cfg["pattern_env"])

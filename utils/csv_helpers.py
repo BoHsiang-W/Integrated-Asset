@@ -21,7 +21,11 @@ def read_existing_csv(path: Path) -> list[dict]:
     if not path.exists() or path.stat().st_size == 0:
         return []
     with open(path, newline="", encoding="utf-8-sig") as fh:
-        return list(csv.DictReader(fh))
+        return [
+            row
+            for row in csv.DictReader(fh)
+            if any(v and v.strip() for v in row.values())
+        ]
 
 
 def write_csv(path: Path, rows: list[dict], fieldnames: list[str]) -> None:
