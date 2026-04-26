@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from typing import Any
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -29,10 +30,17 @@ def get_credentials() -> Credentials:
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
+            try:
+                creds.refresh(Request())
+            except RefreshError:
+                print("Refresh token is invalid or revoked — re-authorising...")
+                os.remove(TOKEN_FILE)
+                creds = None
+
+        if not creds:
             flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
             creds = flow.run_local_server(port=0)
+
         with open(TOKEN_FILE, "w", encoding="utf-8") as fh:
             fh.write(creds.to_json())
 
