@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 from pathlib import Path
 
 from clients.gemini import GeminiClient
@@ -76,12 +77,17 @@ class CardPipeline(BasePipeline):
         print(f"{len(new_files)} new card file(s) to process")
 
         new_rows: list[dict] = []
-        bank_amounts: dict[str, str] = {}
+        monthly_amounts: dict[str, dict[str, str]] = defaultdict(dict)
         for idx, file in enumerate(new_files, start=1):
             print(f"[{idx}/{len(new_files)}] Processing: {file.name}")
             bank_name = match_pattern(file.name, bank_map)
             if not bank_name:
                 continue
+
+            # Extract statement month from filename (decrypted_YYYY-MM-DD_...)
+            month_match = re.search(r"(\d{4})-(\d{2})-\d{2}", file.name)
+            stmt_month = f"{month_match.group(1)}-{month_match.group(2)}" if month_match else "unknown"
+
             prompt = template.replace("{BANK_NAME}", bank_name)
 
             raw = gemini.analyze_pdf(prompt, file)
@@ -96,7 +102,7 @@ class CardPipeline(BasePipeline):
 
             amount_due = _parse_amount_due(raw)
             if amount_due:
-                bank_amounts[bank_name] = amount_due
+                monthly_amounts[stmt_month][bank_name] = amount_due
                 print(f"  應繳金額: {amount_due}")
 
             csv_text = raw.strip()
@@ -110,8 +116,10 @@ class CardPipeline(BasePipeline):
                     print(f"  [parsed row {i}] {dict(r)}")
 
             if rows:
+                for r in rows:
+                    r["_stmt_month"] = stmt_month
                 new_rows.extend(rows)
-                print(f"  Done. ({len(rows)} rows)")
+                print(f"  Done. ({len(rows)} rows → {stmt_month})")
             else:
                 print("  No data rows parsed.")
             processed.add(file.name)
@@ -141,26 +149,8 @@ class CardPipeline(BasePipeline):
             f"\nSaved {self.csv_output} ({len(unique_rows)} rows, {dupes} dupes removed)"
         )
 
-        # --- monthly_summary.csv ---
-        if bank_amounts:
-            summary_path = CARD_DIR / "monthly_summary.csv"
-            existing_summary: dict[str, str] = {}
-            if summary_path.exists():
-                for row in read_existing_csv(summary_path):
-                    bank = row.get("卡別", "").strip()
-                    if bank:
-                        existing_summary[bank] = row.get("應繳金額", "")
-            existing_summary.update(bank_amounts)
-
-            summary_rows = [
-                {"卡別": bank, "應繳金額": existing_summary[bank]}
-                for bank in BANK_ORDER
-                if bank in existing_summary
-            ]
-            write_csv(summary_path, summary_rows, SUMMARY_CSV_FIELDNAMES)
-            print(f"Saved {summary_path} ({len(summary_rows)} banks)")
-
         save_processed(processed, self.processed_file)
+        self._monthly_split(new_rows, monthly_amounts)
 
     # ------------------------------------------------------------------
     # Card-specific helpers
@@ -176,6 +166,66 @@ class CardPipeline(BasePipeline):
             if pattern:
                 result[pattern] = cfg["bank_name"]
         return result
+
+    def _monthly_split(
+        self,
+        rows: list[dict],
+        monthly_amounts: dict[str, dict[str, str]],
+    ) -> None:
+        """Append new rows into per-month folders (credit_card.csv + summary.csv)."""
+        monthly: dict[str, list[dict]] = defaultdict(list)
+        for row in rows:
+            month = row.get("_stmt_month", "unknown")
+            monthly[month].append(row)
+
+        if not monthly or (len(monthly) == 1 and "unknown" in monthly):
+            return
+
+        monthly_dir = CARD_DIR / "monthly"
+
+        for month_key in sorted(monthly):
+            month_dir = monthly_dir / month_key
+            month_dir.mkdir(parents=True, exist_ok=True)
+
+            # credit_card.csv — append new rows to existing
+            cc_path = month_dir / "credit_card.csv"
+            existing_rows = read_existing_csv(cc_path)
+            merged = dedup_and_sort(
+                existing_rows + monthly[month_key],
+                self.csv_fieldnames,
+                sort_key=lambda r: (
+                    r.get("交易日期", ""),
+                    r.get("卡別", ""),
+                    r.get("商店名稱", ""),
+                ),
+            )
+            write_csv(cc_path, merged, self.csv_fieldnames)
+
+            # summary.csv — merge new amounts with existing
+            summary_path = month_dir / "summary.csv"
+            amounts = monthly_amounts.get(month_key, {})
+            if amounts:
+                existing_amounts: dict[str, str] = {}
+                for row in read_existing_csv(summary_path):
+                    bank = row.get("卡別", "").strip()
+                    if bank:
+                        existing_amounts[bank] = row.get("應繳金額", "")
+                existing_amounts.update(amounts)
+
+                summary_rows = [
+                    {"卡別": bank, "應繳金額": existing_amounts[bank]}
+                    for bank in BANK_ORDER
+                    if bank in existing_amounts
+                ]
+                write_csv(summary_path, summary_rows, SUMMARY_CSV_FIELDNAMES)
+
+            print(
+                f"  {month_key}/  "
+                f"{len(merged)} total txns, "
+                f"{len(amounts)} new bank(s)"
+            )
+
+        print(f"Monthly output → {monthly_dir}/")
 
 
 def _parse_amount_due(text: str) -> str | None:
