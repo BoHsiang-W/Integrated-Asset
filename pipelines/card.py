@@ -86,7 +86,11 @@ class CardPipeline(BasePipeline):
 
             # Extract statement month from filename (decrypted_YYYY-MM-DD_...)
             month_match = re.search(r"(\d{4})-(\d{2})-\d{2}", file.name)
-            stmt_month = f"{month_match.group(1)}-{month_match.group(2)}" if month_match else "unknown"
+            stmt_month = (
+                f"{month_match.group(1)}-{month_match.group(2)}"
+                if month_match
+                else "unknown"
+            )
 
             prompt = template.replace("{BANK_NAME}", bank_name)
 
@@ -220,9 +224,7 @@ class CardPipeline(BasePipeline):
                 write_csv(summary_path, summary_rows, SUMMARY_CSV_FIELDNAMES)
 
             print(
-                f"  {month_key}/  "
-                f"{len(merged)} total txns, "
-                f"{len(amounts)} new bank(s)"
+                f"  {month_key}/  {len(merged)} total txns, {len(amounts)} new bank(s)"
             )
 
         print(f"Monthly output → {monthly_dir}/")

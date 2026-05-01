@@ -172,11 +172,19 @@ class IBKRBroker(BaseBroker):
     def _authenticate(self) -> None:
         """Wake up the Client Portal session; auto-resolve account ID if unset."""
         res = self._get("/iserver/accounts")
+        if not res.ok:
+            raise SystemExit(
+                f"❌ IBKR gateway unreachable (HTTP {res.status_code}). "
+                f"Please log in at {self.base_url.replace('/v1/api', '')} first."
+            )
+
         if not self.account:
-            accounts = res.json().get("accounts", []) if res.ok else []
+            accounts = res.json().get("accounts", [])
             if accounts:
                 self.account = accounts[0]
                 print(f"  Resolved IBKR account: {self.account}")
+            else:
+                print("  ❌ No accounts returned. Check gateway credentials.")
 
     def _fetch_conid_transactions(
         self, conid: int, days: int, symbol: str
