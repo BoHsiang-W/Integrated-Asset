@@ -50,6 +50,24 @@ BROKER_CONFIG: dict[str, dict[str, str]] = {
 }
 
 # ---------------------------------------------------------------------------
+# API-based broker configuration
+# ---------------------------------------------------------------------------
+
+API_BROKER_CONFIG: dict[str, dict[str, str]] = {
+    "ETRADE": {
+        "api_key_env": "ETRADE_PROD_API_KEY",
+        "secret_key_env": "ETRADE_PROD_SECRET_KEY",
+        "account_env": "ETRADE_ACCOUNT_ID",
+    },
+    "IBKR": {
+        "host_env": "IBKR_HOST",
+        "port_env": "IBKR_PORT",
+        "account_env": "IBKR_ACCOUNT",
+        "watchlist_env": "IBKR_WATCHLIST_ID",
+    },
+}
+
+# ---------------------------------------------------------------------------
 # Credit-card bank configuration
 # ---------------------------------------------------------------------------
 

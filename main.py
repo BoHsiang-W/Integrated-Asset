@@ -1,12 +1,13 @@
 """CLI entry point for the integrated-asset pipeline.
 
 Usage:
-  python main.py                    # run all stock stages
+  python main.py                    # run all stock stages (fetch -> decrypt -> analyze)
   python main.py --card             # run all card stages
   python main.py --fetch            # stock fetch only
   python main.py --since 10         # custom date range (days ago)
   python main.py --sync             # stock sync to Google Sheets only
   python main.py --ibkr             # fetch from IBKR Client Portal API
+  python main.py --etrade           # fetch from E*TRADE REST API
 """
 
 from __future__ import annotations
@@ -27,6 +28,10 @@ def _parse_args() -> argparse.Namespace:
             "  python main.py --card                   # credit card pipeline\n"
             "  python main.py --card --analyze         # card analyze only\n"
             "  python main.py --sync                   # sync CSV to Google Sheet\n"
+            "  python main.py --ibkr                   # fetch from IBKR Client Portal API\n"
+            "  python main.py --ibkr --since 30        # IBKR transactions from last 30 days\n"
+            "  python main.py --etrade                 # fetch from E*TRADE REST API\n"
+            "  python main.py --etrade --since 90      # E*TRADE transactions from last 90 days\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -65,6 +70,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Stage 5: Fetch transactions from IBKR Client Portal API",
     )
+    parser.add_argument(
+        "--etrade",
+        action="store_true",
+        help="Stage 6: Fetch transactions from E*TRADE REST API (OAuth 1.0a)",
+    )
     return parser.parse_args()
 
 
@@ -95,7 +105,12 @@ def main() -> None:
 
         pipeline = StockPipeline()
         run_all = not (
-            args.fetch or args.decrypt or args.analyze or args.sync or args.ibkr
+            args.fetch
+            or args.decrypt
+            or args.analyze
+            or args.sync
+            or args.ibkr
+            or args.etrade
         )
 
         if run_all:
@@ -116,6 +131,9 @@ def main() -> None:
             if args.ibkr:
                 print("=== Stage 5: Fetching from IBKR ===")
                 pipeline.fetch_ibkr(since=args.since)
+            if args.etrade:
+                print("=== Stage 6: Fetching from E*TRADE ===")
+                pipeline.fetch_etrade(since=args.since)
 
 
 if __name__ == "__main__":

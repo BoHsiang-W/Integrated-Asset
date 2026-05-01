@@ -27,6 +27,7 @@ from utils.csv_helpers import (
 )
 from utils.patterns import load_processed, match_pattern, save_processed
 
+from brokers.etrade import ETradeBroker
 from brokers.ibkr import IBKRBroker
 
 # ---------------------------------------------------------------------------
@@ -257,6 +258,43 @@ class StockPipeline(BasePipeline):
 
         if not new_rows:
             print("No IBKR transactions returned.")
+            return
+
+        print(f"  {len(new_rows)} transaction(s) received.")
+        all_rows = read_existing_csv(self.csv_output) + new_rows
+        all_rows = [r for r in all_rows if any(str(v).strip() for v in r.values())]
+        all_rows = normalize_rows(all_rows, overflow_field="收入")
+        unique_rows = dedup_and_sort(
+            all_rows,
+            self.csv_fieldnames,
+            sort_key=lambda r: (
+                r.get("交易日期", ""),
+                r.get("代號", ""),
+                r.get("買/賣/股利", ""),
+            ),
+        )
+        write_csv(self.csv_output, unique_rows, self.csv_fieldnames)
+        dupes = len(all_rows) - len(unique_rows)
+        print(
+            f"Saved {self.csv_output} ({len(unique_rows)} rows, {dupes} dupes removed)"
+        )
+
+    # ------------------------------------------------------------------
+    # Stage 6 — E*TRADE API fetch
+    # ------------------------------------------------------------------
+
+    def fetch_etrade(self, since: int | None = None) -> None:
+        """Fetch transactions from E*TRADE REST API and merge into transactions.csv."""
+
+        days_back = since if since is not None else 30
+        since_date = date.today() - timedelta(days=days_back)
+
+        print(f"Fetching E*TRADE transactions since {since_date} ...")
+        broker = ETradeBroker()
+        new_rows = broker.fetch_transactions(since=since_date)
+
+        if not new_rows:
+            print("No E*TRADE transactions returned.")
             return
 
         print(f"  {len(new_rows)} transaction(s) received.")
