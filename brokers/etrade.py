@@ -166,7 +166,7 @@ def _map_transaction(txn: dict) -> dict | None:
     brokerage = txn.get("brokerage", {})
     product = brokerage.get("product", {})
     symbol = product.get("symbol", "")
-    qty = str(abs(int(brokerage.get("quantity", 0) or 0)))
+    qty = str(abs(float(brokerage.get("quantity", 0) or 0)))
     price = str(brokerage.get("price", ""))
     fee = str(brokerage.get("fee", 0) or 0)
 
@@ -181,7 +181,7 @@ def _map_transaction(txn: dict) -> dict | None:
         "買/賣/股利": action,
         "代號": symbol,
         "股票": symbol,
-        "交易類別": "US",
+        "交易類別": "ETF",
         "買入股數": qty if is_buy else "",
         "買入價格": price if is_buy else "",
         "賣出股數": qty if is_sell else "",

@@ -234,19 +234,34 @@ class StockPipeline(BasePipeline):
         print(f"\nSynced {total_new} new record(s) to Google Sheet.")
 
     # ------------------------------------------------------------------
-    # Orchestrator override — include sync
+    # Orchestrator override — include broker API fetches
     # ------------------------------------------------------------------
 
-    def run_all(self, *, since: str | None = None, debug: bool = False) -> None:
+    def run_all(
+        self,
+        *,
+        since: int | None = None,
+        debug: bool = False,
+    ) -> None:
         super().run_all(since=since, debug=debug)
-        print("=== Stage 4: Syncing to Google Sheet ===")
-        self.sync()
+        self.run_stage(
+            "Stage 4: Fetching from IBKR",
+            self.fetch_ibkr,
+            since=since,
+            debug=debug,
+        )
+        self.run_stage(
+            "Stage 5: Fetching from E*TRADE",
+            self.fetch_etrade,
+            since=since,
+            debug=debug,
+        )
 
     # ------------------------------------------------------------------
-    # Stage 5 — IBKR API fetch
+    # Stage 4 — IBKR API fetch
     # ------------------------------------------------------------------
 
-    def fetch_ibkr(self, since: int | None = None) -> None:
+    def fetch_ibkr(self, since: int | None = None, *, debug: bool = False) -> None:
         """Fetch transactions from IBKR Client Portal API and merge into transactions.csv."""
 
         days_back = since if since is not None else 7
@@ -261,6 +276,10 @@ class StockPipeline(BasePipeline):
             return
 
         print(f"  {len(new_rows)} transaction(s) received.")
+        if debug:
+            for idx, row in enumerate(new_rows, start=1):
+                print(f"  [IBKR row {idx}] {row}")
+
         all_rows = read_existing_csv(self.csv_output) + new_rows
         all_rows = [r for r in all_rows if any(str(v).strip() for v in r.values())]
         all_rows = normalize_rows(all_rows, overflow_field="收入")
@@ -275,15 +294,18 @@ class StockPipeline(BasePipeline):
         )
         write_csv(self.csv_output, unique_rows, self.csv_fieldnames)
         dupes = len(all_rows) - len(unique_rows)
+        if debug:
+            print(f"  Existing + new row count before dedupe: {len(all_rows)}")
+            print(f"  Unique row count after dedupe: {len(unique_rows)}")
         print(
             f"Saved {self.csv_output} ({len(unique_rows)} rows, {dupes} dupes removed)"
         )
 
     # ------------------------------------------------------------------
-    # Stage 6 — E*TRADE API fetch
+    # Stage 5 — E*TRADE API fetch
     # ------------------------------------------------------------------
 
-    def fetch_etrade(self, since: int | None = None) -> None:
+    def fetch_etrade(self, since: int | None = None, *, debug: bool = False) -> None:
         """Fetch transactions from E*TRADE REST API and merge into transactions.csv."""
 
         days_back = since if since is not None else 30
@@ -298,6 +320,10 @@ class StockPipeline(BasePipeline):
             return
 
         print(f"  {len(new_rows)} transaction(s) received.")
+        if debug:
+            for idx, row in enumerate(new_rows, start=1):
+                print(f"  [E*TRADE row {idx}] {row}")
+
         all_rows = read_existing_csv(self.csv_output) + new_rows
         all_rows = [r for r in all_rows if any(str(v).strip() for v in r.values())]
         all_rows = normalize_rows(all_rows, overflow_field="收入")
@@ -312,6 +338,9 @@ class StockPipeline(BasePipeline):
         )
         write_csv(self.csv_output, unique_rows, self.csv_fieldnames)
         dupes = len(all_rows) - len(unique_rows)
+        if debug:
+            print(f"  Existing + new row count before dedupe: {len(all_rows)}")
+            print(f"  Unique row count after dedupe: {len(unique_rows)}")
         print(
             f"Saved {self.csv_output} ({len(unique_rows)} rows, {dupes} dupes removed)"
         )

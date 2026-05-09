@@ -12,6 +12,33 @@ Automated pipelines for managing stock/ETF transactions, credit-card statements,
 
 ---
 
+## Working Flow
+
+```mermaid
+flowchart TD
+    start["Run pipeline"] --> stock["Stock"]
+    start --> card["Credit card"]
+    start --> crypto["Crypto"]
+
+    stock --> stockPdf["Gmail PDFs"]
+    stockPdf --> stockGemini["Gemini analysis"]
+    stockGemini --> stockCsv["Stock CSV"]
+    stock --> brokers["IBKR / E*TRADE"]
+    brokers --> stockCsv
+    stockCsv --> sheets["Google Sheets"]
+
+    card --> cardPdf["Gmail PDFs"]
+    cardPdf --> cardGemini["Gemini analysis"]
+    cardGemini --> cardCsv["Credit card CSV"]
+    cardGemini --> cardMonthly["Monthly summary CSV"]
+
+    crypto --> exchanges["OKX / Bitget / Binance"]
+    exchanges --> cryptoCsv["Convert to CSV"]
+    cryptoCsv --> stockCsv
+```
+
+---
+
 ## Pre-work
 
 ### 1. Exchange API Keys (for crypto pipeline)
@@ -82,7 +109,7 @@ CATHAY_CARD_PASSWORD=your_password
 ### Stock Pipeline
 
 ```bash
-# Run all stages (fetch → decrypt → analyze → sync), default last 7 days
+# Run all stages except sync (fetch → decrypt → analyze → broker API fetch), default last 7 days
 python main.py
 
 # Fetch since a specific date
@@ -92,6 +119,14 @@ python main.py --since 2026/01/01
 python main.py --fetch
 python main.py --decrypt
 python main.py --analyze
+python main.py --sync
+
+# Fetch broker API transactions and merge into CSV
+python main.py --ibkr
+python main.py --etrade
+python main.py --ibkr --etrade
+
+# Sync CSV to Google Sheets explicitly
 python main.py --sync
 ```
 

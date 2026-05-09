@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import os
 import re
+import traceback
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from datetime import datetime, timedelta
+from typing import Any
 from pathlib import Path
 
 from clients.gmail import GmailClient
@@ -32,10 +35,12 @@ class BasePipeline(ABC):
     # Concrete stages (shared by all pipelines)
     # ------------------------------------------------------------------
 
-    def fetch(self, since: str | None = None) -> None:
+    def fetch(self, since: int | str | None = None) -> None:
         """Stage 1 — Download matching PDF attachments from Gmail."""
         if not since:
             since = (datetime.now() - timedelta(days=7)).strftime("%Y/%m/%d")
+        elif isinstance(since, int):
+            since = (datetime.now() - timedelta(days=since)).strftime("%Y/%m/%d")
 
         patterns: list[str] = []
         for cfg in self.config.values():
@@ -89,14 +94,43 @@ class BasePipeline(ABC):
     def analyze(self, *, debug: bool = False) -> None:
         """Stage 3 — Analyze decrypted PDFs with Gemini (subclass-specific)."""
 
-    def run_all(self, *, since: str | None = None, debug: bool = False) -> None:
+    def run_stage(
+        self,
+        title: str,
+        func: Callable[..., None],
+        **kwargs: Any,
+    ) -> bool:
+        """Run a pipeline stage without letting failures stop later stages."""
+        print(f"=== {title} ===")
+        try:
+            func(**kwargs)
+            return True
+        except Exception:
+            print(f"Stage failed: {title}")
+            print(traceback.format_exc())
+            return False
+
+    def run_all(
+        self,
+        *,
+        since: int | str | None = None,
+        debug: bool = False,
+    ) -> None:
         """Run all stages in sequence."""
-        print(f"=== Stage 1: Fetching attachments ===")
-        self.fetch(since=since)
-        print(f"=== Stage 2: Decrypting PDFs ===")
-        self.decrypt()
-        print(f"=== Stage 3: Analyzing with Gemini ===")
-        self.analyze(debug=debug)
+        self.run_stage(
+            "Stage 1: Fetching attachments",
+            self.fetch,
+            since=since,
+        )
+        self.run_stage(
+            "Stage 2: Decrypting PDFs",
+            self.decrypt,
+        )
+        self.run_stage(
+            "Stage 3: Analyzing with Gemini",
+            self.analyze,
+            debug=debug,
+        )
 
     # ------------------------------------------------------------------
     # Shared helpers
