@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Literal
 
 from dotenv import load_dotenv
+from inputimeout import inputimeout, TimeoutOccurred
 from rauth import OAuth1Service
 
 from brokers.base import BaseBroker
@@ -74,7 +75,7 @@ def _build_oauth_service() -> OAuth1Service:
 def _interactive_authorize(service: OAuth1Service):
     """Run the full OAuth 1.0a handshake (requires user interaction)."""
     request_token, request_token_secret = service.get_request_token(
-        params={"oauth_callback": "oob"}
+        params={"oauth_callback": "oob"},
     )
 
     authorize_url = (
@@ -83,13 +84,17 @@ def _interactive_authorize(service: OAuth1Service):
     )
     print(f"\n  Open this URL to authorize E*TRADE:\n  {authorize_url}\n")
 
-    verifier = input("  Enter verifier code: ").strip()
+    try:
+        verifier = inputimeout(prompt="  Enter verifier code: ", timeout=120).strip()
+    except TimeoutOccurred:
+        raise TimeoutError("No verifier code entered within 120 seconds.")
 
     session = service.get_auth_session(
         request_token,
         request_token_secret,
         method="POST",
         data={"oauth_verifier": verifier},
+        timeout=30,
     )
 
     # Persist tokens for reuse
@@ -160,7 +165,6 @@ def _map_transaction(txn: dict) -> dict | None:
         txn_date = str(raw_date)
 
     txn_type = txn.get("transactionType", "")
-    description = txn.get("description", "")
     amount = txn.get("amount", 0)
 
     brokerage = txn.get("brokerage", {})

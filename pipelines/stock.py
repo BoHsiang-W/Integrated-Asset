@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 from datetime import date, timedelta
-from pathlib import Path
 
 from clients.gemini import GeminiClient
 from clients.sheets import (
@@ -256,6 +255,10 @@ class StockPipeline(BasePipeline):
             since=since,
             debug=debug,
         )
+        self.run_stage(
+            "Final Stage: Syncing to Google Sheet",
+            self.sync,
+        )
 
     # ------------------------------------------------------------------
     # Stage 4 — IBKR API fetch
@@ -264,11 +267,11 @@ class StockPipeline(BasePipeline):
     def fetch_ibkr(self, since: int | None = None, *, debug: bool = False) -> None:
         """Fetch transactions from IBKR Client Portal API and merge into transactions.csv."""
 
-        days_back = since if since is not None else 7
+        days_back = since if since is not None else 30
         since_date = date.today() - timedelta(days=days_back)
 
         print(f"Fetching IBKR transactions since {since_date} ...")
-        broker = IBKRBroker()
+        broker = IBKRBroker(debug=debug)
         new_rows = broker.fetch_transactions(since=since_date)
 
         if not new_rows:
