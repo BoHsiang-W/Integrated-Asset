@@ -49,18 +49,23 @@ Log in to your exchange account and create an API key:
 * **Bitget:** [Create API Key](https://www.bitget.com/account/newapi) | [API Docs](https://bitgetlimited.github.io/apidoc/en/spot/)
 * **Binance:** [Create API Key](https://www.binance.com/en/my/settings/api-management) | [API Docs](https://developers.binance.com/docs/)
 
-### 2. Google Cloud Console
+### 2. Broker API Access (for stock pipeline)
+
+* **IBKR:** [Client Portal Gateway](https://www.interactivebrokers.com/en/trading/ib-api.php) | [API Docs](https://www.interactivebrokers.com/campus/ibkr-api-page/cpapi-v1/)
+* **E*TRADE:** [Developer Portal](https://developer.etrade.com/home) | [API Docs](https://apisb.etrade.com/docs/api/account/api-transaction-v1.html)
+
+### 3. Google Cloud Console
 
 1. Create a project in [Google Cloud Console](https://console.cloud.google.com/).
 2. Enable the **Gmail API** and **Google Sheets API**.
 3. Create OAuth 2.0 credentials and download `credentials.json` to the project root.
 
-### 3. Gemini API Key
+### 4. Gemini API Key
 
 1. Get your API key from [Google AI Studio](https://aistudio.google.com/apikey).
 2. Follow the [Gemini API Quickstart](https://ai.google.dev/gemini-api/docs/quickstart) to verify your key.
 
-### 4. Environment Variables
+### 5. Environment Variables
 
 Create a `.env` file in the project root:
 

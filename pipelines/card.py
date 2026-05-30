@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from pathlib import Path
 
 from clients.gemini import GeminiClient
 from config import (
