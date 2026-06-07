@@ -7,6 +7,31 @@ from datetime import date
 from typing import Literal
 
 
+ETF_SYMBOLS: frozenset[str] = frozenset(
+    {
+        "VOO",
+        "QQQ",
+        "QQQM",
+        "VGT",
+        "CSPX",
+        "SMH",
+        "SPY",
+        "IVV",
+        "EFA",
+        "EEM",
+        "VEA",
+        "VWO",
+        "IEMG",
+        "AGG",
+        "BND",
+        "LQD",
+        "VNQ",
+        "GLD",
+        "SLV",
+    }
+)
+
+
 class BaseBroker(ABC):
     """Common interface for all broker/exchange data sources.
 
@@ -19,6 +44,12 @@ class BaseBroker(ABC):
 
     name: str
     source_type: Literal["gmail_pdf", "api"]
+
+    @staticmethod
+    def classify_symbol_category(symbol: str) -> str:
+        """Return ``ETF`` for known ETF tickers, otherwise ``一般``."""
+        normalized = (symbol or "").strip().upper()
+        return "ETF" if normalized in ETF_SYMBOLS else "一般"
 
     @abstractmethod
     def fetch_transactions(self, since: date) -> list[dict]:
