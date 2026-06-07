@@ -38,8 +38,6 @@ from brokers.base import BaseBroker
 
 WATCHLIST_ID: str = os.getenv("IBKR_WATCHLIST_ID")
 
-_ETF_SYMBOLS: frozenset[str] = frozenset({"VOO", "QQQ", "QQQM", "VGT", "CSPX"})
-
 _ACTION_MAP: dict[str, str] = {
     "Buy": "買",
     "Sell": "賣",
@@ -56,6 +54,7 @@ def _norm_num(value) -> str:
         return f"{float(value):.4f}"
     except (TypeError, ValueError):
         return ""
+
 
 # ---------------------------------------------------------------------------
 # Session helpers
@@ -202,7 +201,7 @@ def _map_transaction(
         "買/賣/股利": action,
         "代號": symbol,
         "股票": symbol,
-        "交易類別": "ETF" if symbol in _ETF_SYMBOLS else "一般",
+        "交易類別": BaseBroker.classify_symbol_category(symbol),
         "買入股數": qty if action == "買" else "",
         "買入價格": price if action == "買" else "",
         "賣出股數": qty if action == "賣" else "",
@@ -210,7 +209,7 @@ def _map_transaction(
         "現價": "",
         "手續費": "",
         "折讓後手續費": commission,
-        "交易稅": "",
+        "交易稅": 0,
         "成交價金": "",
         "交易成本": "",
         "支出": "",
@@ -292,7 +291,9 @@ class IBKRBroker(BaseBroker):
         clamped = max(1, min(days, 7))
         res = self._get(f"/iserver/account/trades?days={clamped}")
         if self.debug:
-            print(f"  /iserver/account/trades HTTP {res.status_code}: {res.text[:1000]}")
+            print(
+                f"  /iserver/account/trades HTTP {res.status_code}: {res.text[:1000]}"
+            )
         if not res.ok:
             print(
                 f"  /iserver/account/trades HTTP {res.status_code}, "

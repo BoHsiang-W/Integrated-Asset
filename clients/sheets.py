@@ -139,12 +139,18 @@ COL_INDEX = {
     "S": 18,
 }
 
-# Contiguous column groups to write, skipping formula/manual columns.
-_WRITE_GROUPS = [
-    ("A", "C", 0, 3),  # A:C  交易日期, 買/賣/股利, 代號
-    ("E", "I", 4, 9),  # E:I  交易類別 … 賣出價格
-    ("L", "L", 11, 12),  # L    折讓後手續費
-    ("Q", "Q", 16, 17),  # Q    收入
+_WRITE_COLUMNS = [
+    ("A", 0),  # 交易日期
+    ("B", 1),  # 買/賣/股利
+    ("C", 2),  # 代號
+    ("E", 4),  # 交易類別
+    ("F", 5),  # 買入股數
+    ("G", 6),  # 買入價格
+    ("H", 7),  # 賣出股數
+    ("I", 8),  # 賣出價格
+    ("L", 11),  # 折讓後手續費
+    ("M", 12),  # 交易稅
+    ("Q", 16),  # 收入
 ]
 
 
@@ -205,13 +211,26 @@ class SheetsSyncWriter:
         return 0
 
     def write_rows(self, start_row: int, rows: list[list[str]]) -> None:
-        """Write *rows* starting at *start_row*, skipping formula columns."""
-        end_row = start_row + len(rows) - 1
+        """Write *rows* starting at *start_row* without clearing formula cells.
+
+        Only non-empty values are written so that existing formulas/manual values
+        in the sheet are not overwritten by empty strings from CSV rows.
+        """
         data = []
-        for start_col, end_col, idx_start, idx_end in _WRITE_GROUPS:
-            range_ = f"{SHEET_NAME}!{start_col}{start_row}:{end_col}{end_row}"
-            values = [row[idx_start:idx_end] for row in rows]
-            data.append({"range": range_, "values": values})
+        for row_offset, row in enumerate(rows):
+            row_num = start_row + row_offset
+            for col_letter, idx in _WRITE_COLUMNS:
+                value = row[idx]
+                if not value:
+                    continue
+                data.append(
+                    {
+                        "range": f"{SHEET_NAME}!{col_letter}{row_num}",
+                        "values": [[value]],
+                    }
+                )
+        if not data:
+            return
         self._sheets.batch_update_ranges(self._sid, data)
 
 
@@ -252,11 +271,11 @@ def extract_sheet_id(raw: str) -> str:
 
 def categorize_csv_row(row: dict) -> str:
     """Return ``'TW'``, ``'US'``, or ``'Crypto'`` based on CSV category."""
-    cat = row.get("交易類別", "").strip()
-    symbol = row.get("代號", "").strip()
+    cat = str(row.get("交易類別") or "").strip()
+    symbol = str(row.get("代號") or "").strip()
     if cat == "Crypto":
         return "Crypto"
-    if (cat == "ETF" or cat == "一般") and symbol and not symbol.isdigit():
+    if (cat == "ETF" or cat == "一般") and symbol and not symbol[0].isdigit():
         return "US"
     return "TW"
 
@@ -265,7 +284,8 @@ def csv_row_to_sheet_row(row: dict) -> list[str]:
     """Convert a CSV dict row to a list of 19 values (columns A–S)."""
     out = [""] * 19
     for field, col_letter in SHEET_COL_MAP.items():
-        val = row.get(field, "").strip()
+        raw_val = row.get(field, "")
+        val = "" if raw_val is None else str(raw_val).strip()
         out[COL_INDEX[col_letter]] = val
     out[0] = normalize_date(out[0])
     out[3] = normalize_stock_name(out[3])
