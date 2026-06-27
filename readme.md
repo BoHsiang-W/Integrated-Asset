@@ -29,8 +29,8 @@ flowchart TD
 
     card --> cardPdf["Gmail PDFs"]
     cardPdf --> cardGemini["Gemini analysis"]
-    cardGemini --> cardCsv["Credit card CSV"]
-    cardGemini --> cardMonthly["Monthly summary CSV"]
+    cardGemini --> cardMonthly["Monthly credit_card.csv + summary.csv"]
+    cardMonthly --> cardCsv["(Optional) Rebuild credit_card_all.csv"]
 
     crypto --> exchanges["OKX / Bitget / Binance"]
     exchanges --> cryptoCsv["Convert to CSV"]
@@ -145,6 +145,9 @@ python main.py --card
 python main.py --card --fetch
 python main.py --card --decrypt
 python main.py --card --analyze
+
+# Rebuild card aggregate CSV from monthly only
+python main.py --rebuild-card-all
 ```
 
 ### Crypto Pipeline
@@ -202,6 +205,9 @@ run_pipeline.bat
     └── card/
         ├── raw/                    # Downloaded card PDFs
         ├── decrypted/              # Decrypted card PDFs
-        ├── credit_card_all.csv     # All credit card transactions
-        └── monthly_summary.csv     # Monthly spending summary
-```
+        ├── monthly/                # Source of truth by statement month
+        │   └── YYYY-MM/
+        │       ├── credit_card.csv # Monthly transaction rows
+        │       └── summary.csv     # Monthly amount due by bank
+        └── credit_card_all.csv     # Rebuilt aggregate from monthly/*/credit_card.csv
+    ```
