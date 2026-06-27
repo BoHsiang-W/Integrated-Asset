@@ -29,7 +29,7 @@ from utils.patterns import load_processed, match_pattern, save_processed
 # ---------------------------------------------------------------------------
 
 CARD_DIR = ATTACHMENTS_DIR / "card"
-CARD_PROMPT_TEMPLATE = PROMPT_DIR / "Credit_Card.md"
+CARD_PROMPT_TEMPLATE = PROMPT_DIR / "CreditCard.md"
 
 
 class CardPipeline(BasePipeline):
@@ -132,28 +132,11 @@ class CardPipeline(BasePipeline):
             save_processed(processed, self.processed_file)
             return
 
-        # --- credit_card_all.csv ---
-        all_rows = read_existing_csv(self.csv_output) + new_rows
-        all_rows = [r for r in all_rows if any(str(v).strip() for v in r.values())]
-        all_rows = normalize_rows(all_rows)
-        unique_rows = dedup_and_sort(
-            all_rows,
-            self.csv_fieldnames,
-            sort_key=lambda r: (
-                r.get("交易日期", ""),
-                r.get("卡別", ""),
-                r.get("商店名稱", ""),
-            ),
-        )
+        new_rows = normalize_rows(new_rows)
 
-        write_csv(self.csv_output, unique_rows, self.csv_fieldnames)
-        dupes = len(all_rows) - len(unique_rows)
-        print(
-            f"\nSaved {self.csv_output} ({len(unique_rows)} rows, {dupes} dupes removed)"
-        )
-
-        save_processed(processed, self.processed_file)
+        # Monthly is the source of truth. Rebuild all from monthly outputs.
         self._monthly_split(new_rows, monthly_amounts)
+        save_processed(processed, self.processed_file)
 
     # ------------------------------------------------------------------
     # Card-specific helpers
@@ -227,6 +210,34 @@ class CardPipeline(BasePipeline):
             )
 
         print(f"Monthly output → {monthly_dir}/")
+
+    def rebuild_all(self) -> None:
+        """Rebuild credit_card_all.csv from monthly/*/credit_card.csv files."""
+        monthly_dir = CARD_DIR / "monthly"
+        if not monthly_dir.exists():
+            print(f"Monthly folder missing. Skip rebuilding {self.csv_output}.")
+            return
+
+        all_rows: list[dict] = []
+        for month_dir in sorted(d for d in monthly_dir.iterdir() if d.is_dir()):
+            cc_path = month_dir / "credit_card.csv"
+            all_rows.extend(read_existing_csv(cc_path))
+
+        all_rows = [r for r in all_rows if any(str(v).strip() for v in r.values())]
+        unique_rows = dedup_and_sort(
+            all_rows,
+            self.csv_fieldnames,
+            sort_key=lambda r: (
+                r.get("交易日期", ""),
+                r.get("卡別", ""),
+                r.get("商店名稱", ""),
+            ),
+        )
+        write_csv(self.csv_output, unique_rows, self.csv_fieldnames)
+        dupes = len(all_rows) - len(unique_rows)
+        print(
+            f"\nRebuilt {self.csv_output} from monthly ({len(unique_rows)} rows, {dupes} dupes removed)"
+        )
 
 
 def _parse_amount_due(text: str) -> str | None:

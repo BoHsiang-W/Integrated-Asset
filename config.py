@@ -30,22 +30,22 @@ BROKER_CONFIG: dict[str, dict[str, str]] = {
     "CATHAY_US": {
         "pattern_env": "CATHAY_US",
         "password_env": "PDF_PASSWORD",
-        "prompt": "Cathay_US.md",
+        "prompt": "CathayUS.md",
     },
     "CATHAY_TW": {
         "pattern_env": "CATHAY_TW",
         "password_env": "PDF_PASSWORD",
-        "prompt": "Cathay_TW.md",
+        "prompt": "CathayTW.md",
     },
     "FUBON_US": {
         "pattern_env": "FUBON_US",
         "password_env": "FUBON_PDF_PASSWORD",
-        "prompt": "Fubon_US.md",
+        "prompt": "FubonUS.md",
     },
     "TW_dividend": {
         "pattern_env": "TW_DIVIDEND",
         "password_env": "PDF_PASSWORD",
-        "prompt": "TW_Dividend.md",
+        "prompt": "TwDividend.md",
     },
 }
 
