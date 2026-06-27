@@ -6,3 +6,7 @@ google-api-python-client
 PyPDF2
 pycryptodome
 tqdm
+yfinance
+matplotlib
+inputimeout
+rauth
