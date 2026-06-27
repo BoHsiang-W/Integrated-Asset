@@ -128,7 +128,11 @@ def _load_saved_session(service: OAuth1Service):
     session = service.get_session((access_token, access_secret))
 
     # Quick validation — if the token is expired E*TRADE returns 401
-    res = session.get(f"{BASE_URL}/v1/accounts/list", headers=JSON_HEADERS)
+    res = session.get(
+        f"{BASE_URL}/v1/accounts/list",
+        headers=JSON_HEADERS,
+        params={},
+    )
     if res.ok:
         print("  Reusing saved E*TRADE token.")
         return session
@@ -193,7 +197,7 @@ def _map_transaction(txn: dict) -> dict | None:
         "現價": "",
         "手續費": "",
         "折讓後手續費": fee,  # No discount logic for now
-        "交易稅": 0,
+        "交易稅": "0",
         "成交價金": "",
         "交易成本": "",
         "支出": str(abs(amount)) if is_buy else "",
@@ -231,8 +235,9 @@ class ETradeBroker(BaseBroker):
 
     def _get(self, path: str, params: dict | None = None):
         """Issue a GET to the E*TRADE v1 API with JSON accept header."""
+        request_params = params or {}
         res = self._session.get(
-            f"{BASE_URL}{path}", headers=JSON_HEADERS, params=params
+            f"{BASE_URL}{path}", headers=JSON_HEADERS, params=request_params
         )
         if not res.ok:
             print(f"  E*TRADE {path} → HTTP {res.status_code}: {res.text}")
