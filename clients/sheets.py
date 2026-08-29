@@ -151,6 +151,7 @@ _WRITE_COLUMNS = [
     ("L", 11),  # 折讓後手續費
     ("M", 12),  # 交易稅
     ("Q", 16),  # 收入
+    ("R", 17),  # 決策原因
 ]
 
 
@@ -258,6 +259,11 @@ def normalize_stock_name(name: str) -> str:
     return name
 
 
+def escape_sheet_formula(value: str) -> str:
+    """Keep formula-like imported values as literal text in Google Sheets."""
+    return f"'{value}" if value.startswith(("=", "+", "-", "@")) else value
+
+
 def make_row_key(date: str, action: str, code: str) -> tuple[str, str, str]:
     """Normalize a (date, action, code) triple for dedup comparison."""
     return (normalize_date(date), action.strip(), code.strip())
@@ -286,7 +292,9 @@ def csv_row_to_sheet_row(row: dict) -> list[str]:
     for field, col_letter in SHEET_COL_MAP.items():
         raw_val = row.get(field, "")
         val = "" if raw_val is None else str(raw_val).strip()
-        out[COL_INDEX[col_letter]] = val
+        out[COL_INDEX[col_letter]] = (
+            val if field == "交易日期" else escape_sheet_formula(val)
+        )
     out[0] = normalize_date(out[0])
     out[3] = normalize_stock_name(out[3])
     return out
