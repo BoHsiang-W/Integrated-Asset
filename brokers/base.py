@@ -46,6 +46,12 @@ class BaseBroker(ABC):
     source_type: Literal["gmail_pdf", "api"]
 
     @staticmethod
+    def to_source_tag(name: str) -> str:
+        """Convert a source name to canonical tag form, e.g. ``IBKR`` -> ``source:ibkr``."""
+        normalized = "".join(ch for ch in (name or "").strip().lower() if ch.isalnum())
+        return f"source:{normalized}" if normalized else "source:unknown"
+
+    @staticmethod
     def classify_symbol_category(symbol: str) -> str:
         """Return ``ETF`` for known ETF tickers, otherwise ``一般``."""
         normalized = (symbol or "").strip().upper()

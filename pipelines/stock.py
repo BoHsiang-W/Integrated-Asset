@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import date, timedelta
+from pathlib import Path
 
 from clients.gemini import GeminiClient
 from clients.sheets import (
@@ -51,6 +52,16 @@ class StockPipeline(BasePipeline):
     # Stage 3
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _source_from_pdf(file_path: Path) -> str:
+        """Return ``YYYY-MM-DD_來源前四字`` derived from the PDF filename."""
+        stem = file_path.stem.removeprefix("decrypted_")
+        parts = stem.split("_", 1)
+        if len(parts) == 2:
+            date_part, source_part = parts
+            return f"{date_part}_{source_part[:4]}"
+        return stem
+
     def analyze(self, *, debug: bool = False) -> None:
         """Analyze decrypted PDFs with Gemini and merge into transactions.csv."""
         prompt_map = self._build_pattern_map("prompt")
@@ -84,6 +95,7 @@ class StockPipeline(BasePipeline):
             if not prompt_path:
                 print(f"  No matching prompt for {file.name}, skipping.")
                 continue
+            source_tag = self._source_from_pdf(file)
 
             raw = gemini.analyze_pdf(prompt_path.read_text(encoding="utf-8"), file)
             if not raw:
@@ -96,6 +108,9 @@ class StockPipeline(BasePipeline):
                 )
 
             rows = parse_csv_response(raw)
+            for row in rows:
+                # Enforce source tracking at pipeline level instead of relying on model output.
+                row["決策原因"] = source_tag
 
             if debug:
                 for i, r in enumerate(rows, 1):

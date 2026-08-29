@@ -161,6 +161,7 @@ def _map_transaction(
     tx: dict,
     conid_map: dict[int, str],
     commission_map: dict[tuple, list[dict]] | None = None,
+    source_tag: str = "source:unknown",
 ) -> dict:
     """Map a single IBKR /pa/transactions item to CSV_FIELDNAMES dict.
 
@@ -214,7 +215,7 @@ def _map_transaction(
         "交易成本": "",
         "支出": "",
         "收入": proceeds,
-        "決策原因": "",
+        "決策原因": source_tag,
         "手續費折數": "",
     }
 
@@ -351,4 +352,7 @@ class IBKRBroker(BaseBroker):
         for conid in tqdm(conids):
             symbol = conid_map.get(conid, str(conid))
             raw.extend(self._fetch_conid_transactions(conid, days, symbol))
-        return [_map_transaction(tx, conid_map, commission_map) for tx in raw]
+        source_tag = BaseBroker.to_source_tag(self.name)
+        return [
+            _map_transaction(tx, conid_map, commission_map, source_tag) for tx in raw
+        ]

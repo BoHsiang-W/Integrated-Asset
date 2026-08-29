@@ -147,7 +147,7 @@ def _load_saved_session(service: OAuth1Service):
 # ---------------------------------------------------------------------------
 
 
-def _map_transaction(txn: dict) -> dict | None:
+def _map_transaction(txn: dict, source_tag: str = "source:unknown") -> dict | None:
     """Map a single E*TRADE transaction dict to CSV_FIELDNAMES dict.
 
     E*TRADE field    → CSV column
@@ -202,7 +202,7 @@ def _map_transaction(txn: dict) -> dict | None:
         "交易成本": "",
         "支出": str(abs(amount)) if is_buy else "",
         "收入": str(abs(amount)) if (is_sell or action == "股利") else "",
-        "決策原因": "",
+        "決策原因": source_tag,
         "手續費折數": "",
     }
 
@@ -288,4 +288,5 @@ class ETradeBroker(BaseBroker):
         raw = self._fetch_account_transactions(ACCOUNT_ID_KEY, since)
         print(f"  {len(raw)} transaction(s)")
 
-        return [r for tx in raw if (r := _map_transaction(tx)) is not None]
+        source_tag = BaseBroker.to_source_tag(self.name)
+        return [r for tx in raw if (r := _map_transaction(tx, source_tag)) is not None]
