@@ -65,6 +65,16 @@ Log in to your exchange account and create an API key:
 1. Get your API key from [Google AI Studio](https://aistudio.google.com/apikey).
 2. Follow the [Gemini API Quickstart](https://ai.google.dev/gemini-api/docs/quickstart) to verify your key.
 
+#### Optional: analyze with Claude instead of Gemini
+
+Set `LLM_PROVIDER=claude` to run Stage 3 through Claude. This path works **only if [Claude Code](https://code.claude.com/docs) is installed and logged in** on the same machine. The pipeline runs the local `claude` command, so it uses your Claude Code login (for example a Pro subscription) and needs no Anthropic API key. Each PDF counts against that subscription's usage limits.
+
+1. Install Claude Code and run `claude` once to log in.
+2. Confirm `claude --version` works in the terminal that runs the pipeline.
+3. Set `LLM_PROVIDER=claude` in `.env`.
+
+If `claude` is not on `PATH`, the pipeline stops at the start of Stage 3 with `claude CLI not found on PATH`. Without `LLM_PROVIDER=claude`, Gemini is used and Claude Code is not needed.
+
 ### 5. Environment Variables
 
 Create a `.env` file in the project root:
@@ -86,6 +96,11 @@ BINANCE_SECRET_KEY=your_binance_secret_key
 
 # --- Gemini ---
 GOOGLE_API_KEY=your_gemini_api_key
+
+# --- Optional: analyze with Claude instead of Gemini ---
+# Requires Claude Code installed and logged in; uses its login, no API key needed.
+# LLM_PROVIDER=claude            # default: gemini
+# CLAUDE_MODEL=claude-sonnet-5-5 # default; e.g. claude-opus-5-5 for higher accuracy
 
 # --- Google Sheets sync ---
 GOOGLE_SHEET_ID=your_spreadsheet_id_or_url
@@ -176,6 +191,8 @@ run_pipeline.bat
 ├── clients/
 │   ├── gmail.py                    # Gmail API client with OAuth2
 │   ├── gemini.py                   # Gemini AI client with retry
+│   ├── claude.py                   # Claude Code CLI client (same analyze_pdf interface)
+│   ├── llm.py                      # LLM_PROVIDER switch: gemini (default) or claude
 │   └── sheets.py                   # Google Sheets sync writer
 │
 ├── models/

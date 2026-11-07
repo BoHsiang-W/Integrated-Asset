@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 
-from clients.gemini import GeminiClient
+from clients.llm import get_llm_client
 from config import (
     ATTACHMENTS_DIR,
     BANK_ORDER,
@@ -48,10 +48,10 @@ class CardPipeline(BasePipeline):
     # ------------------------------------------------------------------
 
     def analyze(self, *, debug: bool = False) -> None:
-        """Analyze credit-card PDFs with Gemini, producing transactions + summary."""
+        """Analyze credit-card PDFs with the configured LLM, producing transactions + summary."""
         bank_map = self._build_bank_map()
         template = CARD_PROMPT_TEMPLATE.read_text(encoding="utf-8")
-        gemini = GeminiClient()
+        llm = get_llm_client()
         processed = load_processed(self.processed_file)
 
         decrypted = (
@@ -93,14 +93,14 @@ class CardPipeline(BasePipeline):
 
             prompt = template.replace("{BANK_NAME}", bank_name)
 
-            raw = gemini.analyze_pdf(prompt, file)
+            raw = llm.analyze_pdf(prompt, file)
             if not raw:
-                print("  No response from Gemini.")
+                print("  No response from LLM.")
                 continue
 
             if debug:
                 print(
-                    f"  --- RAW GEMINI RESPONSE ---\n{raw}\n  --- END RAW RESPONSE ---"
+                    f"  --- RAW LLM RESPONSE ---\n{raw}\n  --- END RAW RESPONSE ---"
                 )
 
             amount_due = _parse_amount_due(raw)
@@ -241,7 +241,7 @@ class CardPipeline(BasePipeline):
 
 
 def _parse_amount_due(text: str) -> str | None:
-    """Extract 應繳金額 value from the first line of Gemini's response."""
+    """Extract 應繳金額 value from the first line of the LLM response."""
     first_line = text.strip().split("\n", 1)[0]
     m = re.match(r"應繳金額[:：]\s*(.+)", first_line)
     if m:

@@ -24,7 +24,7 @@ def _parse_args() -> argparse.Namespace:
             "Examples:\n"
             "  python main.py                          # run stock fetch/decrypt/analyze and broker fetch\n"
             "  python main.py --since 10               # fetch since 10 days ago\n"
-            "  python main.py --analyze                # only Gemini analysis\n"
+            "  python main.py --analyze                # only LLM analysis\n"
             "  python main.py --card                   # credit card pipeline\n"
             "  python main.py --card --analyze         # card analyze only\n"
             "  python main.py --rebuild-card-all       # rebuild card aggregate CSV from monthly\n"
@@ -43,7 +43,7 @@ def _parse_args() -> argparse.Namespace:
         "--decrypt", action="store_true", help="Stage 2: Decrypt PDF attachments"
     )
     parser.add_argument(
-        "--analyze", action="store_true", help="Stage 3: Analyze PDFs with Gemini"
+        "--analyze", action="store_true", help="Stage 3: Analyze PDFs with the LLM (LLM_PROVIDER)"
     )
     parser.add_argument(
         "--card",
@@ -69,7 +69,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--debug",
         action="store_true",
-        help="Print raw Gemini responses and parsed rows",
+        help="Print raw LLM responses and parsed rows",
     )
     parser.add_argument(
         "--ibkr",
@@ -115,7 +115,7 @@ def main() -> None:
                 )
             if args.analyze:
                 pipeline.run_stage(
-                    "Card Stage 3: Analyzing with Gemini",
+                    "Card Stage 3: Analyzing with LLM",
                     pipeline.analyze,
                     debug=args.debug,
                 )
@@ -156,7 +156,7 @@ def main() -> None:
                 )
             if args.analyze:
                 pipeline.run_stage(
-                    "Stage 3: Analyzing with Gemini",
+                    "Stage 3: Analyzing with LLM",
                     pipeline.analyze,
                     debug=args.debug,
                 )

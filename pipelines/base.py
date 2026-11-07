@@ -92,7 +92,7 @@ class BasePipeline(ABC):
 
     @abstractmethod
     def analyze(self, *, debug: bool = False) -> None:
-        """Stage 3 — Analyze decrypted PDFs with Gemini (subclass-specific)."""
+        """Stage 3 — Analyze decrypted PDFs with the LLM (subclass-specific)."""
 
     def run_stage(
         self,
@@ -127,7 +127,7 @@ class BasePipeline(ABC):
             self.decrypt,
         )
         self.run_stage(
-            "Stage 3: Analyzing with Gemini",
+            "Stage 3: Analyzing with LLM",
             self.analyze,
             debug=debug,
         )
