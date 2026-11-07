@@ -29,6 +29,7 @@ class GeminiClient:
     def __init__(self, model: str | None = None) -> None:
         self._client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
         self.models = [model] if model else list(_MODEL_FALLBACK)
+        self.label = f"gemini ({self.models[0]}, {len(self.models) - 1} fallback)"
 
     def analyze_pdf(
         self, prompt: str, pdf_path: Path, max_retries: int = 5

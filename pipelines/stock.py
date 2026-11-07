@@ -6,7 +6,7 @@ import os
 from datetime import date, timedelta
 from pathlib import Path
 
-from clients.gemini import GeminiClient
+from clients.llm import get_llm_client
 from clients.sheets import (
     SheetsSyncWriter,
     SheetsClient,
@@ -63,9 +63,9 @@ class StockPipeline(BasePipeline):
         return stem
 
     def analyze(self, *, debug: bool = False) -> None:
-        """Analyze decrypted PDFs with Gemini and merge into transactions.csv."""
+        """Analyze decrypted PDFs with the configured LLM and merge into transactions.csv."""
         prompt_map = self._build_pattern_map("prompt")
-        gemini = GeminiClient()
+        llm = get_llm_client()
         processed = load_processed(self.processed_file)
 
         decrypted = (
@@ -97,14 +97,14 @@ class StockPipeline(BasePipeline):
                 continue
             source_tag = self._source_from_pdf(file)
 
-            raw = gemini.analyze_pdf(prompt_path.read_text(encoding="utf-8"), file)
+            raw = llm.analyze_pdf(prompt_path.read_text(encoding="utf-8"), file)
             if not raw:
-                print("  No response from Gemini.")
+                print("  No response from LLM.")
                 continue
 
             if debug:
                 print(
-                    f"  --- RAW GEMINI RESPONSE ---\n{raw}\n  --- END RAW RESPONSE ---"
+                    f"  --- RAW LLM RESPONSE ---\n{raw}\n  --- END RAW RESPONSE ---"
                 )
 
             rows = parse_csv_response(raw)
