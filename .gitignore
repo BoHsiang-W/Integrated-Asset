@@ -7,3 +7,5 @@ attachments/*
 __pycache__/
 logs/
 .github/
+brokers/ibkr
+run_pipeline.bat
