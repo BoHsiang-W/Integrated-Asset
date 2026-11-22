@@ -47,7 +47,12 @@ Log in to your exchange account and create an API key:
 
 ### 2. Broker API Access (for stock pipeline)
 
-* **IBKR:** [Client Portal Gateway](https://www.interactivebrokers.com/en/trading/ib-api.php) | [API Docs](https://www.interactivebrokers.com/campus/ibkr-api-page/cpapi-v1/)
+* **IBKR:** [Flex Web Service](https://www.interactivebrokers.com/campus/ibkr-api-page/flex-web-service). No gateway or login is needed.
+  1. In Client Portal, create an Activity Flex Query. Use CSV format with section codes. Include **Trades** at Execution level and **Cash Transactions** with Dividends, Payment in Lieu of Dividends, and Withholding Tax at Detail level. Set the period to the last 30 calendar days.
+  2. Under Settings > Flex Web Service, create a token. Set its expiry to 1 year and renew it before it lapses.
+  3. Put the token and the query ID in `.env` as `IBKR_FLEX_TOKEN` and `IBKR_FLEX_QUERY_ID`.
+
+  Activity data updates once a day after the close, so a run sees trades up to the previous business day. Dividends are stored net of withholding tax.
 * **E*TRADE:** [Developer Portal](https://developer.etrade.com/home) | [API Docs](https://apisb.etrade.com/docs/api/account/api-transaction-v1.html)
 
 ### 3. Google Cloud Console
@@ -89,6 +94,10 @@ BITGET_PASSPHRASE=your_bitget_passphrase
 
 BINANCE_API_KEY=your_binance_api_key
 BINANCE_SECRET_KEY=your_binance_secret_key
+
+# --- IBKR Flex Web Service ---
+IBKR_FLEX_TOKEN=your_flex_token
+IBKR_FLEX_QUERY_ID=your_flex_query_id
 
 # --- Gemini ---
 GOOGLE_API_KEY=your_gemini_api_key
@@ -206,7 +215,7 @@ run_pipeline.bat
 │
 ├── brokers/
 │   ├── base.py                     # BaseBroker ABC
-│   ├── ibkr.py                     # IBKR Client Portal API adapter
+│   ├── ibkr.py                     # IBKR Flex Web Service adapter
 │   └── bitget.py                   # Bitget spot order history adapter
 │
 ├── tests/                          # Offline tests: python -m unittest discover -s tests -t .

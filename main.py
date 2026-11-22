@@ -6,7 +6,7 @@ Usage:
     python main.py --fetch            # stock fetch only
     python main.py --since 10         # custom date range (days ago)
     python main.py --sync             # stock sync to Google Sheets only
-    python main.py --ibkr             # fetch from IBKR Client Portal API
+    python main.py --ibkr             # fetch from IBKR Flex Web Service
     python main.py --etrade           # fetch from E*TRADE REST API
 """
 
@@ -75,7 +75,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--ibkr",
         action="store_true",
-        help="Stage 5: Fetch transactions from IBKR Client Portal API",
+        help="Stage 5: Fetch transactions from IBKR Flex Web Service",
     )
     parser.add_argument(
         "--etrade",

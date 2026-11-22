@@ -32,6 +32,10 @@ ETF_SYMBOLS: frozenset[str] = frozenset(
 )
 
 
+class SourceUnavailable(Exception):
+    """The source cannot be reached in this run, e.g. it needs a human login."""
+
+
 class BaseBroker(ABC):
     """Common interface for all broker/exchange data sources.
 

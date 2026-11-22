@@ -1,358 +1,174 @@
-"""IBKRBroker — Interactive Brokers adapter (Client Portal API).
+"""IBKRBroker — Interactive Brokers adapter (Flex Web Service).
 
-Fetches historical transactions via the Client Portal Gateway REST API.
-Gateway must be running locally before use (default: https://localhost:5000).
+Downloads the Activity Flex Query report and maps its Trades (TRNT) and
+Cash Transactions (CTRN) sections to CSV rows. No gateway or login is needed.
+
+The Flex Query must use CSV format with section codes, include the Trades
+section at Execution level and Cash Transactions with Dividends at Detail level.
 
 Environment variables:
-  IBKR_HOST         — Gateway host (default: localhost)
-  IBKR_PORT         — Gateway port (default: 5000)
-  IBKR_ACCOUNT      — IBKR account ID (auto-resolved from gateway if not set)
-  IBKR_WATCHLIST_ID — Watchlist ID to fetch holdings from (required)
+  IBKR_FLEX_TOKEN    — Flex Web Service token (Settings > Flex Web Service)
+  IBKR_FLEX_QUERY_ID — ID of the Activity Flex Query
 
-Usage:
-  broker = IBKRBroker()
-  transactions = broker.fetch_transactions(since=date(2026, 1, 1))
-
-References:
-  https://www.interactivebrokers.com/campus/ibkr-api-page/cpapi-v1/
-  /pa/transactions          — historical transactions (per-conid, unlimited days)
-  /iserver/account/trades   — executions w/ commission (account-wide, max 7 days)
+Reference:
+  https://www.interactivebrokers.com/campus/ibkr-api-page/flex-web-service
 """
 
 from __future__ import annotations
 
+import csv
 import os
-import warnings
-from contextlib import contextmanager
+import time
+import xml.etree.ElementTree as ET
 from datetime import date
-from typing import Generator, Literal
+from typing import Literal
 
 import requests
-from tqdm import tqdm
 
-from brokers.base import BaseBroker
+from brokers.base import BaseBroker, SourceUnavailable
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
+FLEX_URL = "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService"
 
-WATCHLIST_ID: str = os.getenv("IBKR_WATCHLIST_ID")
-
-_ACTION_MAP: dict[str, str] = {
-    "Buy": "買",
-    "Sell": "賣",
-    "Dividend Payment": "股利",
-}
-
-# Maps /pa/transactions ``type`` → /iserver/account/trades ``side`` char.
-_SIDE_MAP: dict[str, str] = {"Buy": "B", "Sell": "S"}
+_SIDE_MAP: dict[str, str] = {"BUY": "買", "SELL": "賣"}
+_DIVIDEND_TYPES = frozenset({"Dividends", "Payment In Lieu Of Dividends"})
 
 
-def _norm_num(value) -> str:
-    """Normalize numeric value to a 4-decimal string for stable map keys."""
-    try:
-        return f"{float(value):.4f}"
-    except (TypeError, ValueError):
-        return ""
-
-
-# ---------------------------------------------------------------------------
-# Session helpers
-# ---------------------------------------------------------------------------
-
-
-@contextmanager
-def _no_ssl_warnings() -> Generator[None, None, None]:
-    """Suppress InsecureRequestWarning for self-signed IBKR gateway cert."""
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        yield
-
-
-# ---------------------------------------------------------------------------
-# Watchlist helpers  (single network call → derive both conids and symbol map)
-# ---------------------------------------------------------------------------
-
-
-def _fetch_watchlist_instruments(
-    base_url: str,
-    session: requests.Session,
-    watchlist_id: str = WATCHLIST_ID,
-) -> list[dict]:
-    """Return the raw instrument list from an IBKR watchlist (one API call)."""
-    with _no_ssl_warnings():
-        res = session.get(f"{base_url}/iserver/watchlist?id={watchlist_id}")
-    return res.json().get("instruments", [])
-
-
-def _conid_symbol_map(instruments: list[dict]) -> dict[int, str]:
-    """Build a {conid: ticker} map from a pre-fetched instruments list."""
-    return {
-        item["conid"]: item["ticker"]
-        for item in instruments
-        if item.get("conid") and item.get("ticker")
-    }
-
-
-# ---------------------------------------------------------------------------
-# Commission helpers  (/iserver/account/trades)
-# ---------------------------------------------------------------------------
-
-
-def _build_commission_map(trades: list[dict]) -> dict[tuple, list[dict]]:
-    """Build a lookup of executed-trade commissions.
-
-    Key: ``(conid, YYYYMMDD, side, qty)``
-    Val: execution rows with normalized price and commission. Price is kept as
-    metadata because /pa/transactions and /iserver/account/trades may report
-    slightly different prices for the same execution.
-    """
-    out: dict[tuple, list[dict]] = {}
-    for t in trades:
-        conid = t.get("conid")
-        trade_time = t.get("trade_time", "")
-        ymd = trade_time.split("-", 1)[0] if "-" in trade_time else ""
-        side = (t.get("side") or "").strip()
-        qty = _norm_num(t.get("size"))
-        price = _norm_num(t.get("price"))
-        try:
-            commission = float(t.get("commission") or 0)
-        except (TypeError, ValueError):
-            commission = 0.0
-        if not (conid and ymd and side and qty and price):
+def parse_flex_csv(text: str) -> dict[str, list[dict[str, str]]]:
+    """Split a section-coded Flex CSV into ``{section_code: [row dicts]}``."""
+    headers: dict[str, list[str]] = {}
+    sections: dict[str, list[dict[str, str]]] = {}
+    for record in csv.reader(text.splitlines()):
+        if len(record) < 2:
             continue
-        key = (conid, ymd, side, qty)
-        out.setdefault(key, []).append({"price": price, "commission": commission})
-    return out
+        kind, code, values = record[0], record[1], record[2:]
+        if kind == "HEADER":
+            headers[code] = values
+        elif kind == "DATA":
+            sections.setdefault(code, []).append(dict(zip(headers[code], values)))
+    return sections
 
 
-def _match_commission(
-    commission_map: dict[tuple, list[dict]],
-    key: tuple,
-    price,
-) -> float | None:
-    """Return commission for matching executions, tolerating IBKR price drift."""
-    matches = commission_map.get(key, [])
-    if not matches:
-        return None
-    if len(matches) == 1:
-        return matches[0]["commission"]
-
-    normalized_price = _norm_num(price)
-    exact = [m for m in matches if m["price"] == normalized_price]
-    if exact:
-        return sum(m["commission"] for m in exact)
-    return sum(m["commission"] for m in matches)
+def _ymd(raw: str) -> date:
+    return date(int(raw[:4]), int(raw[4:6]), int(raw[6:8]))
 
 
-# ---------------------------------------------------------------------------
-# Transaction mapper
-# ---------------------------------------------------------------------------
+def _csv_date(d: date) -> str:
+    return f"{d.year}/{d.month:02d}/{d.day:02d}"
 
 
-def _parse_trade_date(raw_date: str) -> str:
-    """Convert IBKR rawDate string ``YYYYMMDD`` → ``YYYY/M/D``."""
-    if len(raw_date) == 8:
-        return f"{raw_date[:4]}/{raw_date[4:6]}/{raw_date[6:]}"
-    return raw_date
-
-
-def _map_transaction(
-    tx: dict,
-    conid_map: dict[int, str],
-    commission_map: dict[tuple, list[dict]] | None = None,
-    source_tag: str = "source:unknown",
-) -> dict:
-    """Map a single IBKR /pa/transactions item to CSV_FIELDNAMES dict.
-
-    IBKR field  → CSV column
-    ----------    ----------
-    rawDate      → 交易日期  (YYYY/M/D)
-    type         → 買/賣/股利
-    conid        → 代號  (resolved via conid_map)
-    desc         → 股票
-    qty          → 買入股數 / 賣出股數
-    pr           → 買入價格 / 賣出價格
-    amt          → 收入  (sell/dividend, absolute value)
-
-    ``commission_map`` (from /iserver/account/trades, last ≤7 days) is used
-    to populate 手續費 when a matching execution is found.
-    """
-    raw_date = tx.get("rawDate", "")
-    trade_date = _parse_trade_date(raw_date)
-    action_type = (tx.get("type") or "").strip()
-    action = _ACTION_MAP.get(action_type, "")
-    conid = tx.get("conid")
-    symbol = conid_map.get(conid, str(conid) if conid else "")
-    qty_raw = abs(float(tx.get("qty") or 0))
-    qty = str(qty_raw)
-    price = str(tx.get("pr") or "")
-    proceeds = str(abs(float(tx.get("amt") or 0))) if action in ("賣", "股利") else ""
-
-    commission = ""
-    side_char = _SIDE_MAP.get(action_type, "")
-    if commission_map and side_char and conid:
-        key = (conid, raw_date, side_char, _norm_num(qty_raw))
-        matched_commission = _match_commission(commission_map, key, price)
-        if matched_commission is not None:
-            commission = f"{matched_commission:.2f}"
-
+def _row(trade_date: date, action: str, symbol: str, source_tag: str, **fields: str) -> dict:
     return {
-        "交易日期": trade_date,
+        "交易日期": _csv_date(trade_date),
         "買/賣/股利": action,
         "代號": symbol,
         "股票": symbol,
         "交易類別": BaseBroker.classify_symbol_category(symbol),
-        "買入股數": qty if action == "買" else "",
-        "買入價格": price if action == "買" else "",
-        "賣出股數": qty if action == "賣" else "",
-        "賣出價格": price if action == "賣" else "",
+        "買入股數": "",
+        "買入價格": "",
+        "賣出股數": "",
+        "賣出價格": "",
         "現價": "",
         "手續費": "",
-        "折讓後手續費": commission,
+        "折讓後手續費": "",
         "交易稅": "0",
         "成交價金": "",
         "交易成本": "",
         "支出": "",
-        "收入": proceeds,
+        "收入": "",
         "決策原因": source_tag,
         "手續費折數": "",
+        **fields,
     }
 
 
-# ---------------------------------------------------------------------------
-# IBKRBroker
-# ---------------------------------------------------------------------------
+def map_trade(trade: dict[str, str], source_tag: str) -> dict | None:
+    """Map one TRNT execution to a CSV row; summary-level rows return None."""
+    action = _SIDE_MAP.get(trade.get("Buy/Sell", ""))
+    if action is None or trade.get("LevelOfDetail", "EXECUTION") != "EXECUTION":
+        return None
+    qty = str(abs(float(trade["Quantity"])))
+    price = trade["TradePrice"]
+    side = "買入" if action == "買" else "賣出"
+    fields = {
+        f"{side}股數": qty,
+        f"{side}價格": price,
+        "折讓後手續費": f"{abs(float(trade.get('IBCommission') or 0)):.2f}",
+    }
+    if action == "賣":
+        fields["收入"] = str(abs(float(trade.get("Proceeds") or 0)))
+    return _row(_ymd(trade["TradeDate"]), action, trade["Symbol"], source_tag, **fields)
+
+
+def map_dividends(cash_rows: list[dict[str, str]], source_tag: str) -> list[dict]:
+    """Map CTRN dividends to CSV rows net of the withholding tax booked the same day."""
+    detail = [c for c in cash_rows if c.get("LevelOfDetail", "DETAIL") == "DETAIL"]
+    withheld: dict[tuple[str, str], float] = {}
+    for c in detail:
+        if c.get("Type") == "Withholding Tax":
+            key = (c["Date/Time"][:8], c["Symbol"])
+            withheld[key] = withheld.get(key, 0.0) + float(c["Amount"])
+
+    rows = []
+    for c in detail:
+        if c.get("Type") not in _DIVIDEND_TYPES:
+            continue
+        key = (c["Date/Time"][:8], c["Symbol"])
+        net = float(c["Amount"]) + withheld.get(key, 0.0)
+        rows.append(_row(_ymd(key[0]), "股利", key[1], source_tag, 收入=f"{net:.2f}"))
+    return rows
 
 
 class IBKRBroker(BaseBroker):
-    """Interactive Brokers data source via Client Portal REST API."""
+    """Interactive Brokers data source via the Flex Web Service."""
 
     name = "IBKR"
     source_type: Literal["api"] = "api"
 
-    def __init__(self, *, debug: bool = False) -> None:
-        self.host = os.getenv("IBKR_HOST", "localhost")
-        self.port = os.getenv("IBKR_PORT", "5000")
-        self.account = os.getenv("IBKR_ACCOUNT", "")
-        self.base_url = f"https://{self.host}:{self.port}/v1/api"
+    def __init__(self, *, debug: bool = False, poll_seconds: float = 5, max_polls: int = 12) -> None:
+        self.token = os.getenv("IBKR_FLEX_TOKEN", "")
+        self.query_id = os.getenv("IBKR_FLEX_QUERY_ID", "")
         self.debug = debug
-        self._session = requests.Session()
-        self._session.verify = False
+        self.poll_seconds = poll_seconds
+        self.max_polls = max_polls
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
+    def _download_report(self) -> str:
+        if not (self.token and self.query_id):
+            raise SourceUnavailable("IBKR_FLEX_TOKEN or IBKR_FLEX_QUERY_ID is not set")
 
-    def _get(self, path: str) -> requests.Response:
-        with _no_ssl_warnings():
-            return self._session.get(f"{self.base_url}{path}")
-
-    def _post(self, path: str, payload: dict) -> requests.Response:
-        with _no_ssl_warnings():
-            return self._session.post(f"{self.base_url}{path}", json=payload)
-
-    def _switch_account(self) -> None:
-        if not self.account:
-            return
-        res = self._post(f"/iserver/account/{self.account}/switch", {})
-        if self.debug:
-            print(f"  IBKR account switch HTTP {res.status_code}: {res.text[:500]}")
-        if not res.ok:
-            print(
-                f"  IBKR account switch HTTP {res.status_code}; "
-                "commission lookup may use the previously selected account."
+        res = requests.get(
+            f"{FLEX_URL}/SendRequest",
+            params={"t": self.token, "q": self.query_id, "v": 3},
+            timeout=30,
+        )
+        reply = ET.fromstring(res.text)
+        ref = reply.findtext("ReferenceCode")
+        if reply.findtext("Status") != "Success" or not ref:
+            raise SourceUnavailable(
+                f"IBKR Flex SendRequest failed ({reply.findtext('ErrorCode')}: "
+                f"{reply.findtext('ErrorMessage')})"
             )
 
-    def _authenticate(self) -> None:
-        """Wake up the Client Portal session; auto-resolve account ID if unset."""
-        res = self._get("/iserver/accounts")
-        if not res.ok:
-            raise SystemExit(
-                f"❌ IBKR gateway unreachable (HTTP {res.status_code}). "
-                f"Please log in at {self.base_url.replace('/v1/api', '')} first."
+        for _ in range(self.max_polls):
+            time.sleep(self.poll_seconds)
+            res = requests.get(
+                f"{FLEX_URL}/GetStatement",
+                params={"t": self.token, "q": ref, "v": 3},
+                timeout=60,
             )
-
-        if not self.account:
-            accounts = res.json().get("accounts", [])
-            if accounts:
-                self.account = accounts[0]
-                print(f"  Resolved IBKR account: {self.account}")
-            else:
-                print("  ❌ No accounts returned. Check gateway credentials.")
-
-        self._switch_account()
-
-    def _fetch_account_trades(self, days: int) -> list[dict]:
-        """Fetch executed trades (incl. commission) for the account.
-
-        Endpoint ``/iserver/account/trades`` returns up to 7 days of trades
-        for the currently selected account; values >7 are clamped.
-        """
-        clamped = max(1, min(days, 7))
-        res = self._get(f"/iserver/account/trades?days={clamped}")
-        if self.debug:
-            print(
-                f"  /iserver/account/trades HTTP {res.status_code}: {res.text[:1000]}"
-            )
-        if not res.ok:
-            print(
-                f"  /iserver/account/trades HTTP {res.status_code}, "
-                "skipping commission lookup."
-            )
-            return []
-        data = res.json() or []
-        print(f"  Fetched {len(data)} trade execution(s) for commission lookup.")
-        return data
-
-    def _fetch_conid_transactions(
-        self, conid: int, days: int, symbol: str
-    ) -> list[dict]:
-        """Fetch raw transactions for a single conid."""
-        payload = {
-            "acctIds": [self.account],
-            "conids": [conid],
-            "currency": "USD",
-            "days": days,
-            "types": "TRADE",
-        }
-        res = self._post("/pa/transactions", payload)
-        if not res.ok:
-            print(f"  [{symbol}] HTTP {res.status_code}, skipping.")
-            return []
-        txns = res.json().get("transactions") or []
-        if txns:
-            print(f"  [{symbol}] {len(txns)} transaction(s)")
-        return txns
-
-    # ------------------------------------------------------------------
-    # Public interface
-    # ------------------------------------------------------------------
+            if not res.text.lstrip().startswith("<"):
+                return res.text
+            if self.debug:
+                print(f"  Flex statement not ready: {res.text[:200]}")
+        raise SourceUnavailable(
+            f"IBKR Flex statement not ready after {self.poll_seconds * self.max_polls:.0f} s"
+        )
 
     def fetch_transactions(self, since: date) -> list[dict]:
-        """Fetch historical transactions for all watchlist holdings.
-
-        Note: /pa/transactions accepts only ONE conid per request.
-        Loops over each watchlist conid and aggregates the results.
-        """
-        self._authenticate()
-
-        instruments = _fetch_watchlist_instruments(self.base_url, self._session)
-        conids = [
-            item["conid"]
-            for item in instruments
-            if item.get("ST") == "STK" and item.get("conid")
-        ]
-        conid_map = _conid_symbol_map(instruments)
-        days = (date.today() - since).days
-
-        commission_map = _build_commission_map(self._fetch_account_trades(days))
-
-        raw: list[dict] = []
-        for conid in tqdm(conids):
-            symbol = conid_map.get(conid, str(conid))
-            raw.extend(self._fetch_conid_transactions(conid, days, symbol))
+        """Return trades and net dividends on or after *since* from the Flex report."""
+        sections = parse_flex_csv(self._download_report())
         source_tag = BaseBroker.to_source_tag(self.name)
-        return [
-            _map_transaction(tx, conid_map, commission_map, source_tag) for tx in raw
-        ]
+        trades = [map_trade(t, source_tag) for t in sections.get("TRNT", [])]
+        rows = [r for r in trades if r is not None]
+        rows += map_dividends(sections.get("CTRN", []), source_tag)
+        since_str = _csv_date(since)
+        return [r for r in rows if r["交易日期"] >= since_str]
