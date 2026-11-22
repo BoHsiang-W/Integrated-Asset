@@ -10,3 +10,4 @@ yfinance
 matplotlib
 inputimeout
 rauth
+requests

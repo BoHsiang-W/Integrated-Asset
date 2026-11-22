@@ -8,7 +8,7 @@ Automated pipelines for managing stock/ETF transactions, credit-card statements,
 |----------|-------------|
 | **Stock** | Fetch broker PDF statements from Gmail → decrypt → analyze with Gemini → sync to Google Sheets |
 | **Credit Card** | Fetch credit-card PDF statements from Gmail → decrypt → analyze with Gemini → CSV output |
-| **Crypto** | Fetch balances & trade history from OKX / Bitget / Binance → append to `transactions.csv` |
+| **Crypto** | Fetch filled Bitget spot orders → merge into `transactions.csv` (a stage of the stock pipeline) |
 
 ---
 
@@ -18,12 +18,11 @@ Automated pipelines for managing stock/ETF transactions, credit-card statements,
 flowchart TD
     start["Run pipeline"] --> stock["Stock"]
     start --> card["Credit card"]
-    start --> crypto["Crypto"]
 
     stock --> stockPdf["Gmail PDFs"]
     stockPdf --> stockGemini["Gemini analysis"]
     stockGemini --> stockCsv["Stock CSV"]
-    stock --> brokers["IBKR / E*TRADE"]
+    stock --> brokers["IBKR / E*TRADE / Bitget"]
     brokers --> stockCsv
     stockCsv --> sheets["Google Sheets"]
 
@@ -32,9 +31,6 @@ flowchart TD
     cardGemini --> cardMonthly["Monthly credit_card.csv + summary.csv"]
     cardMonthly --> cardCsv["(Optional) Rebuild credit_card_all.csv"]
 
-    crypto --> exchanges["OKX / Bitget / Binance"]
-    exchanges --> cryptoCsv["Convert to CSV"]
-    cryptoCsv --> stockCsv
 ```
 
 ---
@@ -168,7 +164,12 @@ python main.py --rebuild-card-all
 ### Crypto Pipeline
 
 ```bash
-node sign.js
+# Fetch filled Bitget spot orders (BTCUSDT, ETHUSDT) and merge into transactions.csv
+python main.py --bitget
+
+# Check that every signed OKX / Bitget / Binance endpoint answers.
+# Prints status, record counts, and field names only, never balances.
+python -m clients.exchanges
 ```
 
 ### Scheduled Execution
@@ -185,7 +186,6 @@ run_pipeline.bat
 ```
 ├── main.py                         # CLI entry point
 ├── config.py                       # Centralized constants & configs
-├── sign.js                         # Crypto exchange balance & trade fetcher
 ├── run_pipeline.bat                # Task Scheduler entry with logging
 │
 ├── clients/
@@ -193,7 +193,8 @@ run_pipeline.bat
 │   ├── gemini.py                   # Gemini AI client with retry
 │   ├── claude.py                   # Claude Code CLI client (same analyze_pdf interface)
 │   ├── llm.py                      # LLM_PROVIDER switch: gemini (default) or claude
-│   └── sheets.py                   # Google Sheets sync writer
+│   ├── sheets.py                   # Google Sheets sync writer
+│   └── exchanges.py                # Signed GETs to OKX / Bitget / Binance + endpoint probe
 │
 ├── models/
 │   └── transaction.py              # Transaction & CardTransaction dataclasses
@@ -205,7 +206,10 @@ run_pipeline.bat
 │
 ├── brokers/
 │   ├── base.py                     # BaseBroker ABC
-│   └── ibkr.py                     # IBKR Client Portal API adapter
+│   ├── ibkr.py                     # IBKR Client Portal API adapter
+│   └── bitget.py                   # Bitget spot order history adapter
+│
+├── tests/                          # Offline tests: python -m unittest discover -s tests -t .
 │
 ├── utils/
 │   ├── csv_helpers.py              # CSV parse, read, write, dedup, normalize
