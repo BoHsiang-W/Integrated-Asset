@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from datetime import date, datetime
 from pathlib import Path
 from typing import Literal
@@ -27,7 +28,7 @@ from dotenv import load_dotenv
 from inputimeout import inputimeout, TimeoutOccurred
 from rauth import OAuth1Service
 
-from brokers.base import BaseBroker
+from brokers.base import BaseBroker, SourceUnavailable
 
 load_dotenv()
 
@@ -231,6 +232,10 @@ class ETradeBroker(BaseBroker):
         if self._session is None:
             self._session = _load_saved_session(self._service)
         if self._session is None:
+            if not (sys.stdin.isatty() and sys.stdout.isatty()):
+                raise SourceUnavailable(
+                    "E*TRADE has no valid token and needs a verifier code. Run --etrade in a terminal."
+                )
             self._session = _interactive_authorize(self._service)
 
     def _get(self, path: str, params: dict | None = None):

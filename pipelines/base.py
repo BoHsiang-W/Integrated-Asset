@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from pathlib import Path
 
+from brokers.base import SourceUnavailable
 from clients.gmail import GmailClient
 from utils.patterns import match_pattern
 from utils.pdf_helpers import decrypt_pdf, save_attachments
@@ -105,6 +106,9 @@ class BasePipeline(ABC):
         try:
             func(**kwargs)
             return True
+        except SourceUnavailable as exc:
+            print(f"Stage skipped: {title} ({exc})")
+            return False
         except Exception:
             print(f"Stage failed: {title}")
             print(traceback.format_exc())

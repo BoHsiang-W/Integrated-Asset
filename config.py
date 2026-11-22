@@ -60,10 +60,8 @@ API_BROKER_CONFIG: dict[str, dict[str, str]] = {
         "account_env": "ETRADE_ACCOUNT_ID",
     },
     "IBKR": {
-        "host_env": "IBKR_HOST",
-        "port_env": "IBKR_PORT",
-        "account_env": "IBKR_ACCOUNT",
-        "watchlist_env": "IBKR_WATCHLIST_ID",
+        "token_env": "IBKR_FLEX_TOKEN",
+        "query_id_env": "IBKR_FLEX_QUERY_ID",
     },
 }
 

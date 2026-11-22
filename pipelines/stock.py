@@ -288,7 +288,7 @@ class StockPipeline(BasePipeline):
     # ------------------------------------------------------------------
 
     def fetch_ibkr(self, since: int | None = None, *, debug: bool = False) -> None:
-        """Fetch transactions from IBKR Client Portal API and merge into transactions.csv."""
+        """Fetch transactions from the IBKR Flex Web Service and merge into transactions.csv."""
         self._fetch_api_rows(IBKRBroker(debug=debug), since, debug=debug)
 
     def fetch_etrade(self, since: int | None = None, *, debug: bool = False) -> None:
