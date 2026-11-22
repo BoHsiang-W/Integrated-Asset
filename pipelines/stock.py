@@ -27,6 +27,8 @@ from utils.csv_helpers import (
 )
 from utils.patterns import load_processed, match_pattern, save_processed
 
+from brokers.base import BaseBroker
+from brokers.bitget import BitgetBroker
 from brokers.etrade import ETradeBroker
 from brokers.ibkr import IBKRBroker
 
@@ -271,76 +273,47 @@ class StockPipeline(BasePipeline):
             debug=debug,
         )
         self.run_stage(
+            "Stage 6: Fetching from Bitget",
+            self.fetch_bitget,
+            since=since,
+            debug=debug,
+        )
+        self.run_stage(
             "Final Stage: Syncing to Google Sheet",
             self.sync,
         )
 
     # ------------------------------------------------------------------
-    # Stage 4 — IBKR API fetch
+    # Broker / exchange API fetches
     # ------------------------------------------------------------------
 
     def fetch_ibkr(self, since: int | None = None, *, debug: bool = False) -> None:
         """Fetch transactions from IBKR Client Portal API and merge into transactions.csv."""
-
-        days_back = since if since is not None else 30
-        since_date = date.today() - timedelta(days=days_back)
-
-        print(f"Fetching IBKR transactions since {since_date} ...")
-        broker = IBKRBroker(debug=debug)
-        new_rows = broker.fetch_transactions(since=since_date)
-
-        if not new_rows:
-            print("No IBKR transactions returned.")
-            return
-
-        print(f"  {len(new_rows)} transaction(s) received.")
-        if debug:
-            for idx, row in enumerate(new_rows, start=1):
-                print(f"  [IBKR row {idx}] {row}")
-
-        all_rows = read_existing_csv(self.csv_output) + new_rows
-        all_rows = [r for r in all_rows if any(str(v).strip() for v in r.values())]
-        all_rows = normalize_rows(all_rows, overflow_field="收入")
-        unique_rows = dedup_and_sort(
-            all_rows,
-            self.csv_fieldnames,
-            sort_key=lambda r: (
-                r.get("交易日期", ""),
-                r.get("代號", ""),
-                r.get("買/賣/股利", ""),
-            ),
-        )
-        write_csv(self.csv_output, unique_rows, self.csv_fieldnames)
-        dupes = len(all_rows) - len(unique_rows)
-        if debug:
-            print(f"  Existing + new row count before dedupe: {len(all_rows)}")
-            print(f"  Unique row count after dedupe: {len(unique_rows)}")
-        print(
-            f"Saved {self.csv_output} ({len(unique_rows)} rows, {dupes} dupes removed)"
-        )
-
-    # ------------------------------------------------------------------
-    # Stage 5 — E*TRADE API fetch
-    # ------------------------------------------------------------------
+        self._fetch_api_rows(IBKRBroker(debug=debug), since, debug=debug)
 
     def fetch_etrade(self, since: int | None = None, *, debug: bool = False) -> None:
         """Fetch transactions from E*TRADE REST API and merge into transactions.csv."""
+        self._fetch_api_rows(ETradeBroker(), since, debug=debug)
 
+    def fetch_bitget(self, since: int | None = None, *, debug: bool = False) -> None:
+        """Fetch filled Bitget spot orders and merge into transactions.csv."""
+        self._fetch_api_rows(BitgetBroker(), since, debug=debug)
+
+    def _fetch_api_rows(self, broker: BaseBroker, since: int | None, *, debug: bool) -> None:
         days_back = since if since is not None else 30
         since_date = date.today() - timedelta(days=days_back)
 
-        print(f"Fetching E*TRADE transactions since {since_date} ...")
-        broker = ETradeBroker()
+        print(f"Fetching {broker.name} transactions since {since_date} ...")
         new_rows = broker.fetch_transactions(since=since_date)
 
         if not new_rows:
-            print("No E*TRADE transactions returned.")
+            print(f"No {broker.name} transactions returned.")
             return
 
         print(f"  {len(new_rows)} transaction(s) received.")
         if debug:
             for idx, row in enumerate(new_rows, start=1):
-                print(f"  [E*TRADE row {idx}] {row}")
+                print(f"  [{broker.name} row {idx}] {row}")
 
         all_rows = read_existing_csv(self.csv_output) + new_rows
         all_rows = [r for r in all_rows if any(str(v).strip() for v in r.values())]

@@ -33,6 +33,7 @@ def _parse_args() -> argparse.Namespace:
             "  python main.py --ibkr --since 30        # IBKR transactions from last 30 days\n"
             "  python main.py --etrade                 # fetch E*TRADE transactions\n"
             "  python main.py --etrade --since 90      # E*TRADE transactions from last 90 days\n"
+            "  python main.py --bitget                 # fetch filled Bitget spot orders\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -80,6 +81,11 @@ def _parse_args() -> argparse.Namespace:
         "--etrade",
         action="store_true",
         help="Stage 6: Fetch transactions from E*TRADE REST API (OAuth 1.0a)",
+    )
+    parser.add_argument(
+        "--bitget",
+        action="store_true",
+        help="Stage 6: Fetch filled spot orders from Bitget",
     )
     return parser.parse_args()
 
@@ -135,6 +141,7 @@ def main() -> None:
             or args.sync
             or args.ibkr
             or args.etrade
+            or args.bitget
         )
 
         if run_all:
@@ -171,6 +178,13 @@ def main() -> None:
                 pipeline.run_stage(
                     "Stage 6: Fetching from E*TRADE",
                     pipeline.fetch_etrade,
+                    since=args.since,
+                    debug=args.debug,
+                )
+            if args.bitget:
+                pipeline.run_stage(
+                    "Stage 6: Fetching from Bitget",
+                    pipeline.fetch_bitget,
                     since=args.since,
                     debug=args.debug,
                 )
