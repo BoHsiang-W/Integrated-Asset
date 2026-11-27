@@ -28,7 +28,6 @@ class BasePipeline(ABC):
     raw_dir: Path
     decrypted_dir: Path
     processed_file: Path
-    csv_output: Path
     csv_fieldnames: list[str]
     prompt_dir: Path
 

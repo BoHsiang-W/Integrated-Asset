@@ -29,7 +29,6 @@ flowchart TD
     card --> cardPdf["Gmail PDFs"]
     cardPdf --> cardGemini["Gemini analysis"]
     cardGemini --> cardMonthly["Monthly credit_card.csv + summary.csv"]
-    cardMonthly --> cardCsv["(Optional) Rebuild credit_card_all.csv"]
     cardMonthly --> cardSheet["Amounts due → next month's tab, column E"]
 
 ```
@@ -168,9 +167,6 @@ python main.py --card --fetch
 python main.py --card --decrypt
 python main.py --card --analyze
 
-# Rebuild card aggregate CSV from monthly only
-python main.py --rebuild-card-all
-
 # Write amounts due to the card Sheet
 python main.py --card --sync
 ```
@@ -248,9 +244,8 @@ The batch file runs the stock pipeline and then `python main.py --card`. The car
     └── card/
         ├── raw/                    # Downloaded card PDFs
         ├── decrypted/              # Decrypted card PDFs
-        ├── monthly/                # Source of truth by statement month
-        │   └── YYYY-MM/
-        │       ├── credit_card.csv # Monthly transaction rows
-        │       └── summary.csv     # Monthly amount due by bank
-        └── credit_card_all.csv     # Rebuilt aggregate from monthly/*/credit_card.csv
+        └── monthly/                # Source of truth by statement month
+            └── YYYY-MM/
+                ├── credit_card.csv # Monthly transaction rows
+                └── summary.csv     # Monthly amount due by bank
     ```

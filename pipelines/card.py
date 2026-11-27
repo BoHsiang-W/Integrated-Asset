@@ -43,7 +43,6 @@ class CardPipeline(BasePipeline):
     decrypted_dir = CARD_DIR / "decrypted"
     processed_file = CARD_DIR / ".processed.json"
     monthly_dir = CARD_DIR / "monthly"
-    csv_output = CARD_DIR / "credit_card_all.csv"
     csv_fieldnames = CARD_CSV_FIELDNAMES
     prompt_dir = PROMPT_DIR
 
@@ -259,34 +258,6 @@ class CardPipeline(BasePipeline):
             )
 
         print(f"Monthly output → {monthly_dir}/")
-
-    def rebuild_all(self) -> None:
-        """Rebuild credit_card_all.csv from monthly/*/credit_card.csv files."""
-        monthly_dir = self.monthly_dir
-        if not monthly_dir.exists():
-            print(f"Monthly folder missing. Skip rebuilding {self.csv_output}.")
-            return
-
-        all_rows: list[dict] = []
-        for month_dir in sorted(d for d in monthly_dir.iterdir() if d.is_dir()):
-            cc_path = month_dir / "credit_card.csv"
-            all_rows.extend(read_existing_csv(cc_path))
-
-        all_rows = [r for r in all_rows if any(str(v).strip() for v in r.values())]
-        unique_rows = dedup_and_sort(
-            all_rows,
-            self.csv_fieldnames,
-            sort_key=lambda r: (
-                r.get("交易日期", ""),
-                r.get("卡別", ""),
-                r.get("商店名稱", ""),
-            ),
-        )
-        write_csv(self.csv_output, unique_rows, self.csv_fieldnames)
-        dupes = len(all_rows) - len(unique_rows)
-        print(
-            f"\nRebuilt {self.csv_output} from monthly ({len(unique_rows)} rows, {dupes} dupes removed)"
-        )
 
 
 def _amounts_due(month_dir: Path) -> dict[str, str]:
