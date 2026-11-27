@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import re
 from collections import defaultdict
+from pathlib import Path
 
 from clients.llm import get_llm_client
+from clients.sheets import SheetsClient, extract_sheet_id
 from config import (
     ATTACHMENTS_DIR,
     BANK_ORDER,
@@ -39,7 +42,7 @@ class CardPipeline(BasePipeline):
     raw_dir = CARD_DIR / "raw"
     decrypted_dir = CARD_DIR / "decrypted"
     processed_file = CARD_DIR / ".processed.json"
-    csv_output = CARD_DIR / "credit_card_all.csv"
+    monthly_dir = CARD_DIR / "monthly"
     csv_fieldnames = CARD_CSV_FIELDNAMES
     prompt_dir = PROMPT_DIR
 
@@ -139,13 +142,58 @@ class CardPipeline(BasePipeline):
         save_processed(processed, self.processed_file)
 
     # ------------------------------------------------------------------
+    # Stage 4
+    # ------------------------------------------------------------------
+
+    def run_all(self, *, since: int | str | None = None, debug: bool = False) -> None:
+        super().run_all(since=since, debug=debug)
+        self.run_stage("Stage 4: Syncing amounts due to Google Sheet", self.sync)
+
+    def sync(self) -> None:
+        """Write the latest month's summary.csv into column E of the next month's tab.
+
+        The month counts as complete once it has every bank the previous month had.
+        """
+        raw_id = os.getenv("GOOGLE_CARD_SHEET_ID")
+        if not raw_id:
+            print("GOOGLE_CARD_SHEET_ID not set in .env — skipping card sync.")
+            return
+
+        months = sorted(d for d in self.monthly_dir.glob("*") if d.is_dir())
+        if not months:
+            print("No statement month to sync.")
+            return
+        latest = months[-1]
+        amounts = _amounts_due(latest)
+        previous = _amounts_due(months[-2]) if len(months) > 1 else {}
+        missing = [b for b in previous if b not in amounts]
+        if not amounts or missing:
+            print(f"{latest.name}: waiting for {', '.join(missing) or 'statements'}. Not written.")
+            return
+
+        tab = sheet_tab_for(latest.name)
+        sid = extract_sheet_id(raw_id)
+        sheets = SheetsClient()
+        if sheets.get_sheet_id(sid, tab) is None:
+            print(f"{latest.name}: tab '{tab}' does not exist. Not written.")
+            return
+        rows = {r[0].strip(): i for i, r in enumerate(sheets.read_rows(sid, f"'{tab}'!A1:A50"), 1) if r}
+        absent = [b for b in amounts if b not in rows]
+        if absent:
+            print(f"{latest.name}: tab '{tab}' has no row for {', '.join(absent)}. Not written.")
+            return
+
+        sheets.batch_update_ranges(
+            sid, [{"range": f"'{tab}'!E{rows[b]}", "values": [[a]]} for b, a in amounts.items()]
+        )
+        print(f"{latest.name}: wrote {len(amounts)} bank(s) to '{tab}'.")
+
+    # ------------------------------------------------------------------
     # Card-specific helpers
     # ------------------------------------------------------------------
 
     def _build_bank_map(self) -> dict[str, str]:
         """Build a {filename_regex: bank_name} mapping from CARD_CONFIG."""
-        import os
-
         result: dict[str, str] = {}
         for cfg in self.config.values():
             pattern = os.getenv(cfg["pattern_env"])
@@ -167,7 +215,7 @@ class CardPipeline(BasePipeline):
         if not monthly or (len(monthly) == 1 and "unknown" in monthly):
             return
 
-        monthly_dir = CARD_DIR / "monthly"
+        monthly_dir = self.monthly_dir
 
         for month_key in sorted(monthly):
             month_dir = monthly_dir / month_key
@@ -211,33 +259,21 @@ class CardPipeline(BasePipeline):
 
         print(f"Monthly output → {monthly_dir}/")
 
-    def rebuild_all(self) -> None:
-        """Rebuild credit_card_all.csv from monthly/*/credit_card.csv files."""
-        monthly_dir = CARD_DIR / "monthly"
-        if not monthly_dir.exists():
-            print(f"Monthly folder missing. Skip rebuilding {self.csv_output}.")
-            return
 
-        all_rows: list[dict] = []
-        for month_dir in sorted(d for d in monthly_dir.iterdir() if d.is_dir()):
-            cc_path = month_dir / "credit_card.csv"
-            all_rows.extend(read_existing_csv(cc_path))
+def _amounts_due(month_dir: Path) -> dict[str, str]:
+    """Return ``{bank: amount_due}`` from a month folder's summary.csv."""
+    return {
+        r["卡別"].strip(): r["應繳金額"].strip()
+        for r in read_existing_csv(month_dir / "summary.csv")
+        if r.get("卡別", "").strip() and r.get("應繳金額", "").strip()
+    }
 
-        all_rows = [r for r in all_rows if any(str(v).strip() for v in r.values())]
-        unique_rows = dedup_and_sort(
-            all_rows,
-            self.csv_fieldnames,
-            sort_key=lambda r: (
-                r.get("交易日期", ""),
-                r.get("卡別", ""),
-                r.get("商店名稱", ""),
-            ),
-        )
-        write_csv(self.csv_output, unique_rows, self.csv_fieldnames)
-        dupes = len(all_rows) - len(unique_rows)
-        print(
-            f"\nRebuilt {self.csv_output} from monthly ({len(unique_rows)} rows, {dupes} dupes removed)"
-        )
+
+def sheet_tab_for(stmt_month: str) -> str:
+    """Statements are paid the month after they arrive: ``2000-01`` → ``2000/02``."""
+    year, month = map(int, stmt_month.split("-"))
+    year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return f"{year}/{month:02d}"
 
 
 def _parse_amount_due(text: str) -> str | None:

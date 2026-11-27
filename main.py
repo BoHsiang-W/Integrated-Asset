@@ -27,7 +27,7 @@ def _parse_args() -> argparse.Namespace:
             "  python main.py --analyze                # only LLM analysis\n"
             "  python main.py --card                   # credit card pipeline\n"
             "  python main.py --card --analyze         # card analyze only\n"
-            "  python main.py --rebuild-card-all       # rebuild card aggregate CSV from monthly\n"
+            "  python main.py --card --sync            # write card amounts due to Google Sheet\n"
             "  python main.py --sync                   # sync CSV to Google Sheet\n"
             "  python main.py --ibkr                   # fetch IBKR transactions\n"
             "  python main.py --ibkr --since 30        # IBKR transactions from last 30 days\n"
@@ -52,11 +52,6 @@ def _parse_args() -> argparse.Namespace:
         help="Run credit-card pipeline instead of stock pipeline",
     )
     parser.add_argument(
-        "--rebuild-card-all",
-        action="store_true",
-        help="Rebuild attachments/card/credit_card_all.csv from attachments/card/monthly",
-    )
-    parser.add_argument(
         "--since",
         type=int,
         metavar="DAYS",
@@ -65,7 +60,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sync",
         action="store_true",
-        help="Stage 4: Sync transactions.csv to Google Sheet",
+        help="Stage 4: Sync transactions.csv (or with --card, amounts due) to Google Sheet",
     )
     parser.add_argument(
         "--debug",
@@ -94,13 +89,11 @@ def main() -> None:
     load_dotenv()
     args = _parse_args()
 
-    if args.card or args.rebuild_card_all:
+    if args.card:
         from pipelines.card import CardPipeline
 
         pipeline = CardPipeline()
-        run_all = not (
-            args.fetch or args.decrypt or args.analyze or args.rebuild_card_all
-        )
+        run_all = not (args.fetch or args.decrypt or args.analyze or args.sync)
 
         if run_all:
             pipeline.run_all(
@@ -125,10 +118,10 @@ def main() -> None:
                     pipeline.analyze,
                     debug=args.debug,
                 )
-            if args.rebuild_card_all:
+            if args.sync:
                 pipeline.run_stage(
-                    "Card Utility: Rebuilding aggregate CSV",
-                    pipeline.rebuild_all,
+                    "Card Stage 4: Syncing amounts due to Google Sheet",
+                    pipeline.sync,
                 )
     else:
         from pipelines.stock import StockPipeline

@@ -7,7 +7,7 @@ Automated pipelines for managing stock/ETF transactions, credit-card statements,
 | Pipeline | Description |
 |----------|-------------|
 | **Stock** | Fetch broker PDF statements from Gmail → decrypt → analyze with Gemini → sync to Google Sheets |
-| **Credit Card** | Fetch credit-card PDF statements from Gmail → decrypt → analyze with Gemini → CSV output |
+| **Credit Card** | Fetch credit-card PDF statements from Gmail → decrypt → analyze with Gemini → CSV output → amounts due to Google Sheets |
 | **Crypto** | Fetch filled Bitget spot orders → merge into `transactions.csv` (a stage of the stock pipeline) |
 
 ---
@@ -29,7 +29,7 @@ flowchart TD
     card --> cardPdf["Gmail PDFs"]
     cardPdf --> cardGemini["Gemini analysis"]
     cardGemini --> cardMonthly["Monthly credit_card.csv + summary.csv"]
-    cardMonthly --> cardCsv["(Optional) Rebuild credit_card_all.csv"]
+    cardMonthly --> cardSheet["Amounts due → next month's tab, column E"]
 
 ```
 
@@ -113,6 +113,7 @@ GOOGLE_API_KEY=your_gemini_api_key
 
 # --- Google Sheets sync ---
 GOOGLE_SHEET_ID=your_spreadsheet_id_or_url
+GOOGLE_CARD_SHEET_ID=your_card_spreadsheet_id_or_url
 
 # --- PDF passwords (stock brokers) ---
 PDF_PASSWORD=your_cathay_pdf_password
@@ -170,9 +171,15 @@ python main.py --card --fetch
 python main.py --card --decrypt
 python main.py --card --analyze
 
-# Rebuild card aggregate CSV from monthly only
-python main.py --rebuild-card-all
+# Write amounts due to the card Sheet
+python main.py --card --sync
 ```
+
+`--card` with no stage flag ends with the sync stage. The sync reads the latest `monthly/YYYY-MM/summary.csv`. It writes each bank's amount due into column E of the tab for the next month, so statements that arrive in `2000-01` go to tab `2000/02`. The row for each bank is found by its name in column A. No other column is written.
+
+* The month is written only when it has every bank that the previous month's `summary.csv` has. Until then, each run prints the missing banks and writes nothing.
+* The sync writes nothing if the tab does not exist or has no row for a bank. It never creates a tab or a row.
+* Each run writes the latest month again, so a value typed by hand into column E of that tab is replaced on the next run.
 
 ### Crypto Pipeline
 
@@ -191,6 +198,8 @@ python -m clients.exchanges
 # Windows Task Scheduler (logs to logs/YYYY-MM-DD.log)
 run_pipeline.bat
 ```
+
+The batch file runs the stock pipeline and then `python main.py --card`. The card run includes the Sheet sync, so a month reaches the Sheet on the first daily run after its last expected statement is analyzed.
 
 ---
 
@@ -239,9 +248,8 @@ run_pipeline.bat
     └── card/
         ├── raw/                    # Downloaded card PDFs
         ├── decrypted/              # Decrypted card PDFs
-        ├── monthly/                # Source of truth by statement month
-        │   └── YYYY-MM/
-        │       ├── credit_card.csv # Monthly transaction rows
-        │       └── summary.csv     # Monthly amount due by bank
-        └── credit_card_all.csv     # Rebuilt aggregate from monthly/*/credit_card.csv
+        └── monthly/                # Source of truth by statement month
+            └── YYYY-MM/
+                ├── credit_card.csv # Monthly transaction rows
+                └── summary.csv     # Monthly amount due by bank
     ```
