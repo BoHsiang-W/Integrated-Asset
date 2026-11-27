@@ -46,11 +46,10 @@ JSON_HEADERS = {"Accept": "application/json"}
 
 ETRADE_TOKEN_FILE = Path("etrade_token.json")
 
-_ACTION_MAP: dict[str, str] = {
-    "Bought": "買",
-    "Sold": "賣",
-    "Dividend": "股利",
-}
+_SIDE_MAP: dict[str, str] = {"Bought": "買", "Sold": "賣"}
+_DIVIDEND_TYPES = frozenset({"Dividend", "Qualified Dividend"})
+_WITHHOLDING_TYPE = "Tax Withholding"
+_PAGE_SIZE = 50
 
 # ---------------------------------------------------------------------------
 # OAuth helpers
@@ -148,64 +147,70 @@ def _load_saved_session(service: OAuth1Service):
 # ---------------------------------------------------------------------------
 
 
-def _map_transaction(txn: dict, source_tag: str = "source:unknown") -> dict | None:
-    """Map a single E*TRADE transaction dict to CSV_FIELDNAMES dict.
+def _csv_date(txn: dict) -> str:
+    return datetime.fromtimestamp(txn["transactionDate"] / 1000).strftime("%Y/%m/%d")
 
-    E*TRADE field    → CSV column
-    --------------     ----------
-    transactionDate  → 交易日期  (epoch int64 → YYYY/M/D)
-    category         → 買/賣/股利
-    brokerage.product.symbol → 代號
-    description      → 股票
-    amount           → 收入 / 支出
-    brokerage.quantity → 買入股數 / 賣出股數
-    brokerage.price    → 買入價格 / 賣出價格
-    brokerage.commission → 手續費
-    """
-    raw_date = txn.get("transactionDate", 0)
-    if isinstance(raw_date, (int, float)) and raw_date > 0:
-        dt = datetime.fromtimestamp(raw_date / 1000)
-        txn_date = dt.strftime("%Y/%m/%d")
-    else:
-        txn_date = str(raw_date)
 
-    txn_type = txn.get("transactionType", "")
-    amount = txn.get("amount", 0)
+def _symbol(txn: dict) -> str:
+    return txn.get("brokerage", {}).get("product", {}).get("symbol", "")
 
-    brokerage = txn.get("brokerage", {})
-    product = brokerage.get("product", {})
-    symbol = product.get("symbol", "")
-    qty = str(abs(float(brokerage.get("quantity", 0) or 0)))
-    price = str(brokerage.get("price", ""))
-    fee = str(brokerage.get("fee", 0) or 0)
 
-    action = _ACTION_MAP.get(txn_type)
-    if action is None:
-        return None
-    is_buy = action == "買"
-    is_sell = action == "賣"
-
+def _row(txn: dict, action: str, source_tag: str, **fields: str) -> dict:
+    symbol = _symbol(txn)
     return {
-        "交易日期": txn_date,
+        "交易日期": _csv_date(txn),
         "買/賣/股利": action,
         "代號": symbol,
         "股票": symbol,
         "交易類別": BaseBroker.classify_symbol_category(symbol),
-        "買入股數": qty if is_buy else "",
-        "買入價格": price if is_buy else "",
-        "賣出股數": qty if is_sell else "",
-        "賣出價格": price if is_sell else "",
+        "買入股數": "",
+        "買入價格": "",
+        "賣出股數": "",
+        "賣出價格": "",
         "現價": "",
         "手續費": "",
-        "折讓後手續費": fee,  # No discount logic for now
+        "折讓後手續費": str(txn.get("brokerage", {}).get("fee", 0) or 0),
         "交易稅": "0",
         "成交價金": "",
         "交易成本": "",
-        "支出": str(abs(amount)) if is_buy else "",
-        "收入": str(abs(amount)) if (is_sell or action == "股利") else "",
+        "支出": "",
+        "收入": "",
         "決策原因": source_tag,
         "手續費折數": "",
+        **fields,
     }
+
+
+def map_trade(txn: dict, source_tag: str) -> dict | None:
+    """Map one Bought/Sold transaction to a CSV row; any other type returns None."""
+    action = _SIDE_MAP.get(txn.get("transactionType", ""))
+    if action is None:
+        return None
+    brokerage = txn.get("brokerage", {})
+    side = "買入" if action == "買" else "賣出"
+    fields = {
+        f"{side}股數": str(abs(float(brokerage.get("quantity", 0) or 0))),
+        f"{side}價格": str(brokerage.get("price", "")),
+        "支出" if action == "買" else "收入": str(abs(txn.get("amount", 0))),
+    }
+    return _row(txn, action, source_tag, **fields)
+
+
+def map_dividends(raw: list[dict], source_tag: str) -> list[dict]:
+    """Map dividends to CSV rows net of the withholding tax booked the same day."""
+    withheld: dict[tuple[int, str], float] = {}
+    for txn in raw:
+        if txn.get("transactionType") == _WITHHOLDING_TYPE:
+            key = (txn["transactionDate"], _symbol(txn))
+            withheld[key] = withheld.get(key, 0.0) + float(txn["amount"])
+
+    rows = []
+    for txn in raw:
+        if txn.get("transactionType") not in _DIVIDEND_TYPES:
+            continue
+        net = float(txn["amount"]) + withheld.get((txn["transactionDate"], _symbol(txn)), 0.0)
+        rows.append(_row(txn, "股利", source_tag, 收入=f"{net:.2f}"))
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -268,16 +273,27 @@ class ETradeBroker(BaseBroker):
     def _fetch_account_transactions(
         self, account_id_key: str, start: date
     ) -> list[dict]:
-        """Fetch transactions for one account since *start*."""
-        start_str = start.strftime("%m%d%Y")  # E*TRADE date format: MMDDYYYY
-        res = self._get(
-            f"/v1/accounts/{account_id_key}/transactions",
-            params={"startDate": start_str},
-        )
-        if not res.ok or not res.text.strip():
-            return []
+        """Fetch every transaction from *start* to today, following page markers.
 
-        return res.json().get("TransactionListResponse", {}).get("Transaction", [])
+        Without endDate the API ignores startDate and returns only the last 30 days,
+        and moreTransactions can be false on a full page, so paging stops on a short page.
+        """
+        params: dict = {
+            "startDate": start.strftime("%m%d%Y"),
+            "endDate": date.today().strftime("%m%d%Y"),
+            "count": _PAGE_SIZE,
+        }
+        txns: list[dict] = []
+        while True:
+            res = self._get(f"/v1/accounts/{account_id_key}/transactions", params=params)
+            if not res.ok or not res.text.strip():
+                return txns
+            body = res.json().get("TransactionListResponse", {})
+            page = body.get("Transaction", [])
+            txns += page
+            if len(page) < _PAGE_SIZE or not body.get("marker"):
+                return txns
+            params = {**params, "marker": body["marker"]}
 
     # ------------------------------------------------------------------
     # Public interface
@@ -294,4 +310,5 @@ class ETradeBroker(BaseBroker):
         print(f"  {len(raw)} transaction(s)")
 
         source_tag = BaseBroker.to_source_tag(self.name)
-        return [r for tx in raw if (r := _map_transaction(tx, source_tag)) is not None]
+        trades = [map_trade(t, source_tag) for t in raw]
+        return [r for r in trades if r is not None] + map_dividends(raw, source_tag)

@@ -54,6 +54,10 @@ Log in to your exchange account and create an API key:
 
   Activity data updates once a day after the close, so a run sees trades up to the previous business day. Dividends are stored net of withholding tax.
 * **E*TRADE:** [Developer Portal](https://developer.etrade.com/home) | [API Docs](https://apisb.etrade.com/docs/api/account/api-transaction-v1.html)
+  1. Put the consumer key, the consumer secret, and the account ID key in `.env` as `ETRADE_PROD_API_KEY`, `ETRADE_PROD_SECRET_KEY`, and `ETRADE_ACCOUNT_ID`.
+  2. Run `python main.py --etrade` in a terminal once. Open the URL it prints, and enter the verifier code. The token is saved to `etrade_token.json`. A scheduled run skips E*TRADE when the token has expired.
+
+  Only Bought, Sold, Dividend, and Qualified Dividend transactions become rows. Dividends are stored net of the Tax Withholding booked on the same day for the same symbol. Transfers, deposits, and interest are skipped. History goes back two years and is fetched in pages of 50.
 
 ### 3. Google Cloud Console
 
@@ -137,8 +141,8 @@ CATHAY_CARD_PASSWORD=your_password
 # Run all stages except sync (fetch → decrypt → analyze → broker API fetch), default last 7 days
 python main.py
 
-# Fetch since a specific date
-python main.py --since 2026/01/01
+# Fetch the last 90 days
+python main.py --since 90
 
 # Run individual stages
 python main.py --fetch
