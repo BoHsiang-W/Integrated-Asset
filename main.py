@@ -27,6 +27,7 @@ def _parse_args() -> argparse.Namespace:
             "  python main.py --analyze                # only LLM analysis\n"
             "  python main.py --card                   # credit card pipeline\n"
             "  python main.py --card --analyze         # card analyze only\n"
+            "  python main.py --card --sync            # write card amounts due to Google Sheet\n"
             "  python main.py --rebuild-card-all       # rebuild card aggregate CSV from monthly\n"
             "  python main.py --sync                   # sync CSV to Google Sheet\n"
             "  python main.py --ibkr                   # fetch IBKR transactions\n"
@@ -65,7 +66,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sync",
         action="store_true",
-        help="Stage 4: Sync transactions.csv to Google Sheet",
+        help="Stage 4: Sync transactions.csv (or with --card, amounts due) to Google Sheet",
     )
     parser.add_argument(
         "--debug",
@@ -99,7 +100,11 @@ def main() -> None:
 
         pipeline = CardPipeline()
         run_all = not (
-            args.fetch or args.decrypt or args.analyze or args.rebuild_card_all
+            args.fetch
+            or args.decrypt
+            or args.analyze
+            or args.sync
+            or args.rebuild_card_all
         )
 
         if run_all:
@@ -124,6 +129,11 @@ def main() -> None:
                     "Card Stage 3: Analyzing with LLM",
                     pipeline.analyze,
                     debug=args.debug,
+                )
+            if args.sync:
+                pipeline.run_stage(
+                    "Card Stage 4: Syncing amounts due to Google Sheet",
+                    pipeline.sync,
                 )
             if args.rebuild_card_all:
                 pipeline.run_stage(
