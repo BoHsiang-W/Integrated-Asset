@@ -8,6 +8,9 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      # The pipeline turns timestamps into dates in local time and runs in Taipei.
+      TZ: Asia/Taipei
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
