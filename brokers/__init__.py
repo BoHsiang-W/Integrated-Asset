@@ -3,4 +3,4 @@
 from brokers.etrade import ETradeBroker
 from brokers.ibkr import IBKRBroker
 
-__all__ = ["IBKRBroker", "ETradeBroker"]
+__all__ = ["ETradeBroker", "IBKRBroker"]

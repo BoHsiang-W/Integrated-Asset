@@ -56,7 +56,9 @@ def _csv_date(d: date) -> str:
     return f"{d.year}/{d.month:02d}/{d.day:02d}"
 
 
-def _row(trade_date: date, action: str, symbol: str, source_tag: str, **fields: str) -> dict:
+def _row(
+    trade_date: date, action: str, symbol: str, source_tag: str, **fields: str
+) -> dict:
     return {
         "交易日期": _csv_date(trade_date),
         "買/賣/股利": action,
@@ -124,7 +126,9 @@ class IBKRBroker(BaseBroker):
     name = "IBKR"
     source_type: Literal["api"] = "api"
 
-    def __init__(self, *, debug: bool = False, poll_seconds: float = 5, max_polls: int = 12) -> None:
+    def __init__(
+        self, *, debug: bool = False, poll_seconds: float = 5, max_polls: int = 12
+    ) -> None:
         self.token = os.getenv("IBKR_FLEX_TOKEN", "")
         self.query_id = os.getenv("IBKR_FLEX_QUERY_ID", "")
         self.debug = debug
@@ -137,7 +141,7 @@ class IBKRBroker(BaseBroker):
 
         res = requests.get(
             f"{FLEX_URL}/SendRequest",
-            params={"t": self.token, "q": self.query_id, "v": 3},
+            params={"t": self.token, "q": self.query_id, "v": "3"},
             timeout=30,
         )
         reply = ET.fromstring(res.text)
@@ -152,7 +156,7 @@ class IBKRBroker(BaseBroker):
             time.sleep(self.poll_seconds)
             res = requests.get(
                 f"{FLEX_URL}/GetStatement",
-                params={"t": self.token, "q": ref, "v": 3},
+                params={"t": self.token, "q": ref, "v": "3"},
                 timeout=60,
             )
             if not res.text.lstrip().startswith("<"):

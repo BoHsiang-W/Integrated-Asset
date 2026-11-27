@@ -25,8 +25,8 @@ from pathlib import Path
 from typing import Literal
 
 from dotenv import load_dotenv
-from inputimeout import inputimeout, TimeoutOccurred
-from rauth import OAuth1Service
+from inputimeout import TimeoutOccurred, inputimeout
+from rauth import OAuth1Service, OAuth1Session
 
 from brokers.base import BaseBroker, SourceUnavailable
 
@@ -208,7 +208,9 @@ def map_dividends(raw: list[dict], source_tag: str) -> list[dict]:
     for txn in raw:
         if txn.get("transactionType") not in _DIVIDEND_TYPES:
             continue
-        net = float(txn["amount"]) + withheld.get((txn["transactionDate"], _symbol(txn)), 0.0)
+        net = float(txn["amount"]) + withheld.get(
+            (txn["transactionDate"], _symbol(txn)), 0.0
+        )
         rows.append(_row(txn, "股利", source_tag, 收入=f"{net:.2f}"))
     return rows
 
@@ -226,7 +228,7 @@ class ETradeBroker(BaseBroker):
 
     def __init__(self) -> None:
         self._service = _build_oauth_service()
-        self._session = None
+        self._session: OAuth1Session | None = None
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -245,6 +247,8 @@ class ETradeBroker(BaseBroker):
 
     def _get(self, path: str, params: dict | None = None):
         """Issue a GET to the E*TRADE v1 API with JSON accept header."""
+        if self._session is None:
+            raise RuntimeError("_ensure_session must run before _get")
         request_params = params or {}
         res = self._session.get(
             f"{BASE_URL}{path}", headers=JSON_HEADERS, params=request_params
@@ -285,7 +289,9 @@ class ETradeBroker(BaseBroker):
         }
         txns: list[dict] = []
         while True:
-            res = self._get(f"/v1/accounts/{account_id_key}/transactions", params=params)
+            res = self._get(
+                f"/v1/accounts/{account_id_key}/transactions", params=params
+            )
             if not res.ok or not res.text.strip():
                 return txns
             body = res.json().get("TransactionListResponse", {})

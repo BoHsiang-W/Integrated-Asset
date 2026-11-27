@@ -37,6 +37,10 @@ flowchart TD
 
 ## Pre-work
 
+### 0. Install
+
+Install [uv](https://docs.astral.sh/uv/), then run `uv sync` in the project root. It installs Python 3.14 and the locked versions from `uv.lock`, including the dev tools.
+
 ### 1. Exchange API Keys (for crypto pipeline)
 
 Log in to your exchange account and create an API key:
@@ -203,9 +207,26 @@ The batch file runs the stock pipeline and then `python main.py --card`. The car
 
 ---
 
+## Checks
+
+CI runs these on every pull request and on each push to `master`. Run them locally before you push:
+
+```bash
+uv run ruff format .        # format; CI runs it with --check
+uv run ruff check .         # lint
+uv run mypy .               # type check
+uv run python -m unittest discover -s tests -t .
+```
+
+The settings for ruff and mypy are in `pyproject.toml`.
+
+---
+
 ## Project Structure
 
 ```
+├── pyproject.toml                  # Dependencies, dev tools, ruff and mypy settings
+├── uv.lock                         # Locked dependency versions
 ├── main.py                         # CLI entry point
 ├── config.py                       # Centralized constants & configs
 ├── run_pipeline.bat                # Task Scheduler entry with logging

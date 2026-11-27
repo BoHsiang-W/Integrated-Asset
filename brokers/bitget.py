@@ -30,7 +30,9 @@ def order_to_row(order: dict) -> dict | None:
     price = f"{price_avg:.6f}"
     is_buy = order["side"] == "buy"
     return {
-        "交易日期": datetime.fromtimestamp(int(order["uTime"]) / 1000).strftime("%Y/%m/%d"),
+        "交易日期": datetime.fromtimestamp(int(order["uTime"]) / 1000).strftime(
+            "%Y/%m/%d"
+        ),
         "買/賣/股利": _ACTION[order["side"]],
         "代號": order.get("baseCoin") or "",
         "股票": order["symbol"],
@@ -51,7 +53,9 @@ class BitgetBroker(BaseBroker):
     def fetch_transactions(self, since: date) -> list[dict]:
         rows: list[dict] = []
         for symbol in SYMBOLS:
-            path = "/api/v2/spot/trade/history-orders?" + urlencode({"symbol": symbol, "limit": "100"})
+            path = "/api/v2/spot/trade/history-orders?" + urlencode(
+                {"symbol": symbol, "limit": "100"}
+            )
             orders = signed_get(BITGET, path)["data"] or []
             mapped = [row for row in map(order_to_row, orders) if row]
             print(f"  [{symbol}] {len(orders)} order(s), {len(mapped)} filled")

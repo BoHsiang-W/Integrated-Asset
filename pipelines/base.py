@@ -8,8 +8,8 @@ import traceback
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Any
 from pathlib import Path
+from typing import Any
 
 from brokers.base import SourceUnavailable
 from clients.gmail import GmailClient
@@ -146,6 +146,7 @@ class BasePipeline(ABC):
             pattern = os.getenv(cfg["pattern_env"])
             if not pattern:
                 continue
+            value: str | Path | None
             if value_key == "password_env":
                 value = os.getenv(cfg[value_key])
                 if not value:

@@ -44,7 +44,9 @@ def _parse_args() -> argparse.Namespace:
         "--decrypt", action="store_true", help="Stage 2: Decrypt PDF attachments"
     )
     parser.add_argument(
-        "--analyze", action="store_true", help="Stage 3: Analyze PDFs with the LLM (LLM_PROVIDER)"
+        "--analyze",
+        action="store_true",
+        help="Stage 3: Analyze PDFs with the LLM (LLM_PROVIDER)",
     )
     parser.add_argument(
         "--card",
@@ -92,36 +94,36 @@ def main() -> None:
     if args.card:
         from pipelines.card import CardPipeline
 
-        pipeline = CardPipeline()
+        card_pipeline = CardPipeline()
         run_all = not (args.fetch or args.decrypt or args.analyze or args.sync)
 
         if run_all:
-            pipeline.run_all(
+            card_pipeline.run_all(
                 since=args.since,
                 debug=args.debug,
             )
         else:
             if args.fetch:
-                pipeline.run_stage(
+                card_pipeline.run_stage(
                     "Card Stage 1: Fetching attachments",
-                    pipeline.fetch,
+                    card_pipeline.fetch,
                     since=args.since,
                 )
             if args.decrypt:
-                pipeline.run_stage(
+                card_pipeline.run_stage(
                     "Card Stage 2: Decrypting PDFs",
-                    pipeline.decrypt,
+                    card_pipeline.decrypt,
                 )
             if args.analyze:
-                pipeline.run_stage(
+                card_pipeline.run_stage(
                     "Card Stage 3: Analyzing with LLM",
-                    pipeline.analyze,
+                    card_pipeline.analyze,
                     debug=args.debug,
                 )
             if args.sync:
-                pipeline.run_stage(
+                card_pipeline.run_stage(
                     "Card Stage 4: Syncing amounts due to Google Sheet",
-                    pipeline.sync,
+                    card_pipeline.sync,
                 )
     else:
         from pipelines.stock import StockPipeline
