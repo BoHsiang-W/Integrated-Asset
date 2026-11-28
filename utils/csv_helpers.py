@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import csv
 import re
+from collections.abc import Callable
 from io import StringIO
 from pathlib import Path
-from typing import Callable
 
 
 def parse_csv_response(text: str) -> list[dict]:

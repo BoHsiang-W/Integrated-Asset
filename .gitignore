@@ -2,10 +2,9 @@
 *.json
 *.pdf
 prompt/
-node_modules/
 attachments/*
 __pycache__/
 logs/
-.github/
-brokers/ibkr
+.github/*
+!.github/workflows/
 run_pipeline.bat

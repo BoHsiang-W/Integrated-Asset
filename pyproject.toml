@@ -1,0 +1,33 @@
+[project]
+name = "integrated-asset"
+version = "0.1.0"
+description = "Stock, credit-card, and crypto statement pipelines with Google Sheets sync."
+requires-python = ">=3.14"
+dependencies = [
+    "google-api-python-client>=2.198.0",
+    "google-auth>=2.55.1",
+    "google-auth-oauthlib>=1.4.0",
+    "google-genai>=2.10.0,<3",
+    "inputimeout>=1.0.4",
+    "pycryptodome>=3.23.0",
+    "pypdf2>=3.0.1",
+    "python-dotenv>=1.2.2",
+    "rauth>=0.7.3",
+    "requests>=2.34.2",
+    "tqdm>=4.68.3",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.18",
+    "ruff>=0.15",
+]
+
+[tool.ruff.lint]
+extend-select = ["I"]
+# Stage runner, Gemini retry, and PDF decrypt catch every exception on purpose so one failure skips only its item.
+# Multi-line test fixtures read better as a joined list than as one f-string.
+ignore = ["BLE001", "FLY002"]
+
+[tool.mypy]
+ignore_missing_imports = true

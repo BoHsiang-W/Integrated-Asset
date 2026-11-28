@@ -6,10 +6,14 @@ import os
 from datetime import date, timedelta
 from pathlib import Path
 
+from brokers.base import BaseBroker
+from brokers.bitget import BitgetBroker
+from brokers.etrade import ETradeBroker
+from brokers.ibkr import IBKRBroker
 from clients.llm import get_llm_client
 from clients.sheets import (
-    SheetsSyncWriter,
     SheetsClient,
+    SheetsSyncWriter,
     categorize_csv_row,
     csv_row_to_sheet_row,
     extract_sheet_id,
@@ -26,11 +30,6 @@ from utils.csv_helpers import (
     write_csv,
 )
 from utils.patterns import load_processed, match_pattern, save_processed
-
-from brokers.base import BaseBroker
-from brokers.bitget import BitgetBroker
-from brokers.etrade import ETradeBroker
-from brokers.ibkr import IBKRBroker
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -105,9 +104,7 @@ class StockPipeline(BasePipeline):
                 continue
 
             if debug:
-                print(
-                    f"  --- RAW LLM RESPONSE ---\n{raw}\n  --- END RAW RESPONSE ---"
-                )
+                print(f"  --- RAW LLM RESPONSE ---\n{raw}\n  --- END RAW RESPONSE ---")
 
             rows = parse_csv_response(raw)
             for row in rows:
@@ -256,7 +253,7 @@ class StockPipeline(BasePipeline):
     def run_all(
         self,
         *,
-        since: int | None = None,
+        since: int | str | None = None,
         debug: bool = False,
     ) -> None:
         super().run_all(since=since, debug=debug)
@@ -299,7 +296,9 @@ class StockPipeline(BasePipeline):
         """Fetch filled Bitget spot orders and merge into transactions.csv."""
         self._fetch_api_rows(BitgetBroker(), since, debug=debug)
 
-    def _fetch_api_rows(self, broker: BaseBroker, since: int | None, *, debug: bool) -> None:
+    def _fetch_api_rows(
+        self, broker: BaseBroker, since: int | None, *, debug: bool
+    ) -> None:
         days_back = since if since is not None else 30
         since_date = date.today() - timedelta(days=days_back)
 

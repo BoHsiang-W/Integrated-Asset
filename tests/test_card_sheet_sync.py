@@ -8,8 +8,8 @@ from io import StringIO
 from pathlib import Path
 from unittest import mock
 
-import pipelines.card as card
 from config import SUMMARY_CSV_FIELDNAMES
+from pipelines import card
 from utils.csv_helpers import write_csv
 
 BANK_COLUMN = [["Bank Account Name"], ["BankA"], ["BankB"], ["BankC"], ["Total"]]
@@ -73,7 +73,9 @@ class CardSheetSyncTest(unittest.TestCase):
     def test_december_statement_goes_to_january_of_next_year(self):
         self.summary("2000-12", {"BankA": "1"})
         self.sync()
-        self.assertEqual(self.sheets.writes, [{"range": "'2001/01'!E2", "values": [["1"]]}])
+        self.assertEqual(
+            self.sheets.writes, [{"range": "'2001/01'!E2", "values": [["1"]]}]
+        )
 
     def test_missing_tab_writes_nothing(self):
         self.summary("2000-05", {"BankA": "1"})
@@ -86,9 +88,12 @@ class CardSheetSyncTest(unittest.TestCase):
         self.assertEqual(self.sheets.writes, [])
 
     def test_without_sheet_id_nothing_is_contacted(self):
-        with mock.patch.dict(os.environ, {}, clear=True), mock.patch.object(card, "SheetsClient") as client:
-            with redirect_stdout(StringIO()):
-                self.pipeline.sync()
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(card, "SheetsClient") as client,
+            redirect_stdout(StringIO()),
+        ):
+            self.pipeline.sync()
         client.assert_not_called()
 
 

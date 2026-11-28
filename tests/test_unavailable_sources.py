@@ -9,26 +9,39 @@ from io import StringIO
 from pathlib import Path
 from unittest import mock
 
-import brokers.etrade as etrade
+from brokers import etrade
 from pipelines.base import BasePipeline
 
 
 def run_stages(*funcs) -> tuple[list[bool], str]:
     out = StringIO()
     with redirect_stdout(out):
-        results = [BasePipeline.run_stage(mock.Mock(spec=BasePipeline), f"Stage {i}", f) for i, f in enumerate(funcs, 1)]
+        results = [
+            BasePipeline.run_stage(mock.Mock(spec=BasePipeline), f"Stage {i}", f)
+            for i, f in enumerate(funcs, 1)
+        ]
     return results, out.getvalue()
 
 
 class UnavailableSourceTest(unittest.TestCase):
     def test_etrade_without_token_off_terminal_skips_without_waiting(self):
         missing = Path(tempfile.gettempdir()) / "no-such-etrade-token.json"
-        patches = {"ETRADE_TOKEN_FILE": missing, "CONSUMER_KEY": "k", "CONSUMER_SECRET": "s", "ACCOUNT_ID_KEY": "a"}
+        patches = {
+            "ETRADE_TOKEN_FILE": missing,
+            "CONSUMER_KEY": "k",
+            "CONSUMER_SECRET": "s",
+            "ACCOUNT_ID_KEY": "a",
+        }
         later = mock.Mock()
-        with mock.patch.multiple(etrade, **patches), mock.patch.object(etrade, "_interactive_authorize") as prompt:
+        with (
+            mock.patch.multiple(etrade, **patches),
+            mock.patch.object(etrade, "_interactive_authorize") as prompt,
+        ):
             broker = etrade.ETradeBroker()
             started = time.monotonic()
-            results, log = run_stages(lambda: broker.fetch_transactions(date(2026, 1, 1)), later)
+            results, log = run_stages(
+                lambda: broker.fetch_transactions(date(2026, 1, 1)), later
+            )
 
         self.assertLess(time.monotonic() - started, 5, "no 120 s verifier wait")
         prompt.assert_not_called()

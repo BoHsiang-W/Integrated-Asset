@@ -8,7 +8,6 @@ from googleapiclient.discovery import build
 
 from clients.gmail import get_credentials
 
-
 # ---------------------------------------------------------------------------
 # SheetsClient — generic Sheets API wrapper
 # ---------------------------------------------------------------------------

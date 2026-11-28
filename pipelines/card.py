@@ -102,9 +102,7 @@ class CardPipeline(BasePipeline):
                 continue
 
             if debug:
-                print(
-                    f"  --- RAW LLM RESPONSE ---\n{raw}\n  --- END RAW RESPONSE ---"
-                )
+                print(f"  --- RAW LLM RESPONSE ---\n{raw}\n  --- END RAW RESPONSE ---")
 
             amount_due = _parse_amount_due(raw)
             if amount_due:
@@ -168,7 +166,9 @@ class CardPipeline(BasePipeline):
         previous = _amounts_due(months[-2]) if len(months) > 1 else {}
         missing = [b for b in previous if b not in amounts]
         if not amounts or missing:
-            print(f"{latest.name}: waiting for {', '.join(missing) or 'statements'}. Not written.")
+            print(
+                f"{latest.name}: waiting for {', '.join(missing) or 'statements'}. Not written."
+            )
             return
 
         tab = sheet_tab_for(latest.name)
@@ -177,14 +177,24 @@ class CardPipeline(BasePipeline):
         if sheets.get_sheet_id(sid, tab) is None:
             print(f"{latest.name}: tab '{tab}' does not exist. Not written.")
             return
-        rows = {r[0].strip(): i for i, r in enumerate(sheets.read_rows(sid, f"'{tab}'!A1:A50"), 1) if r}
+        rows = {
+            r[0].strip(): i
+            for i, r in enumerate(sheets.read_rows(sid, f"'{tab}'!A1:A50"), 1)
+            if r
+        }
         absent = [b for b in amounts if b not in rows]
         if absent:
-            print(f"{latest.name}: tab '{tab}' has no row for {', '.join(absent)}. Not written.")
+            print(
+                f"{latest.name}: tab '{tab}' has no row for {', '.join(absent)}. Not written."
+            )
             return
 
         sheets.batch_update_ranges(
-            sid, [{"range": f"'{tab}'!E{rows[b]}", "values": [[a]]} for b, a in amounts.items()]
+            sid,
+            [
+                {"range": f"'{tab}'!E{rows[b]}", "values": [[a]]}
+                for b, a in amounts.items()
+            ],
         )
         print(f"{latest.name}: wrote {len(amounts)} bank(s) to '{tab}'.")
 

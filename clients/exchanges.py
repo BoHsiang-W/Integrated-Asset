@@ -13,9 +13,10 @@ import hashlib
 import hmac
 import os
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Callable
+from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import urlencode
 
 import requests
@@ -42,7 +43,9 @@ def _hmac_sha256(secret: str, message: str) -> bytes:
 
 
 def sign_okx(creds: Credentials, path_with_query: str, timestamp: str) -> SignedRequest:
-    signature = base64.b64encode(_hmac_sha256(creds.secret_key, timestamp + "GET" + path_with_query)).decode()
+    signature = base64.b64encode(
+        _hmac_sha256(creds.secret_key, timestamp + "GET" + path_with_query)
+    ).decode()
     return SignedRequest(
         url="https://www.okx.com" + path_with_query,
         headers={
@@ -55,8 +58,12 @@ def sign_okx(creds: Credentials, path_with_query: str, timestamp: str) -> Signed
     )
 
 
-def sign_bitget(creds: Credentials, path_with_query: str, timestamp: str) -> SignedRequest:
-    signature = base64.b64encode(_hmac_sha256(creds.secret_key, timestamp + "GET" + path_with_query)).decode()
+def sign_bitget(
+    creds: Credentials, path_with_query: str, timestamp: str
+) -> SignedRequest:
+    signature = base64.b64encode(
+        _hmac_sha256(creds.secret_key, timestamp + "GET" + path_with_query)
+    ).decode()
     return SignedRequest(
         url="https://api.bitget.com" + path_with_query,
         headers={
@@ -70,7 +77,9 @@ def sign_bitget(creds: Credentials, path_with_query: str, timestamp: str) -> Sig
     )
 
 
-def sign_binance(creds: Credentials, path_with_query: str, timestamp: str) -> SignedRequest:
+def sign_binance(
+    creds: Credentials, path_with_query: str, timestamp: str
+) -> SignedRequest:
     path, _, query = path_with_query.partition("?")
     query = f"timestamp={timestamp}&{query}" if query else f"timestamp={timestamp}"
     signature = _hmac_sha256(creds.secret_key, query).hex()
@@ -81,7 +90,7 @@ def sign_binance(creds: Credentials, path_with_query: str, timestamp: str) -> Si
 
 
 def _okx_timestamp() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _epoch_ms() -> str:
@@ -89,15 +98,27 @@ def _epoch_ms() -> str:
 
 
 def _okx_error(body: Any) -> str | None:
-    return None if body.get("code") == "0" else f"code={body.get('code')} msg={body.get('msg')}"
+    return (
+        None
+        if body.get("code") == "0"
+        else f"code={body.get('code')} msg={body.get('msg')}"
+    )
 
 
 def _bitget_error(body: Any) -> str | None:
-    return None if body.get("code") == "00000" else f"code={body.get('code')} msg={body.get('msg')}"
+    return (
+        None
+        if body.get("code") == "00000"
+        else f"code={body.get('code')} msg={body.get('msg')}"
+    )
 
 
 def _binance_error(body: Any) -> str | None:
-    return f"code={body.get('code')} msg={body.get('msg')}" if "code" in body and "rows" not in body else None
+    return (
+        f"code={body.get('code')} msg={body.get('msg')}"
+        if "code" in body and "rows" not in body
+        else None
+    )
 
 
 @dataclass(frozen=True)
@@ -127,24 +148,47 @@ class ExchangeError(RuntimeError):
 
 def signed_get(exchange: Exchange, path_with_query: str) -> Any:
     """GET a signed endpoint and return the parsed JSON body, or raise ``ExchangeError``."""
-    request = exchange.sign(exchange.credentials(), path_with_query, exchange.timestamp())
-    response = requests.get(request.url, headers=request.headers, timeout=REQUEST_TIMEOUT_S)
+    request = exchange.sign(
+        exchange.credentials(), path_with_query, exchange.timestamp()
+    )
+    response = requests.get(
+        request.url, headers=request.headers, timeout=REQUEST_TIMEOUT_S
+    )
     try:
         body = response.json()
     except ValueError as exc:
-        raise ExchangeError(f"{exchange.name} HTTP {response.status_code}, body is not JSON") from exc
+        raise ExchangeError(
+            f"{exchange.name} HTTP {response.status_code}, body is not JSON"
+        ) from exc
     error = exchange.error_of(body) if isinstance(body, dict) else None
     if not response.ok or error:
-        raise ExchangeError(f"{exchange.name} HTTP {response.status_code} {error or ''}".strip())
+        raise ExchangeError(
+            f"{exchange.name} HTTP {response.status_code} {error or ''}".strip()
+        )
     return body
 
 
 SIGN_JS_ENDPOINTS: list[tuple[Exchange, str, Callable[[Any], Any]]] = [
     (OKX, "/api/v5/finance/savings/balance?ccy=USDT", lambda b: b.get("data")),
     (BITGET, "/api/v2/earn/account/assets?coin=USDT", lambda b: b.get("data")),
-    (BITGET, "/api/v2/spot/trade/history-orders?" + urlencode({"symbol": "BTCUSDT", "limit": "100"}), lambda b: b.get("data")),
-    (BITGET, "/api/v2/spot/trade/history-orders?" + urlencode({"symbol": "ETHUSDT", "limit": "100"}), lambda b: b.get("data")),
-    (BINANCE, "/sapi/v1/simple-earn/flexible/position?" + urlencode({"asset": "", "current": "1", "size": "10"}), lambda b: b.get("rows")),
+    (
+        BITGET,
+        "/api/v2/spot/trade/history-orders?"
+        + urlencode({"symbol": "BTCUSDT", "limit": "100"}),
+        lambda b: b.get("data"),
+    ),
+    (
+        BITGET,
+        "/api/v2/spot/trade/history-orders?"
+        + urlencode({"symbol": "ETHUSDT", "limit": "100"}),
+        lambda b: b.get("data"),
+    ),
+    (
+        BINANCE,
+        "/sapi/v1/simple-earn/flexible/position?"
+        + urlencode({"asset": "", "current": "1", "size": "10"}),
+        lambda b: b.get("rows"),
+    ),
 ]
 
 
@@ -157,7 +201,9 @@ def probe() -> bool:
         try:
             records = records_of(signed_get(exchange, path))
             fields = sorted(records[0].keys()) if records else []
-            print(f"OK    {exchange.name:8} {endpoint}  records={len(records or [])}  fields={fields}")
+            print(
+                f"OK    {exchange.name:8} {endpoint}  records={len(records or [])}  fields={fields}"
+            )
         except (ExchangeError, requests.RequestException) as exc:
             all_ok = False
             print(f"FAIL  {exchange.name:8} {endpoint}  {type(exc).__name__}: {exc}")
